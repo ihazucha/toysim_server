@@ -15,10 +15,10 @@
 
 import threading
 import queue
-import time
 import numpy as np
 import socket
-import cv2
+import os
+
 
 HOST = 'localhost'
 PORT = 6666
@@ -33,11 +33,16 @@ def game_thread():
         DATA_QUEUE.put(data, block=True)
 
 def data_thread():
+    try:
+        data_sender()
+    except Exception as e:
+        print(f"[Data] Exception occured: {e}")
+        os._exit(1)
+
+def data_sender():
     addr = (HOST, PORT)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect(addr)
-        print("[Data] sending hello...")
-        s.sendall(b"hello")
         settings = s.recv(8)
         print(f"[Data] Received settings: {settings}")
         while True:

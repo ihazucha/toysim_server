@@ -1,102 +1,94 @@
 #!/usr/bin/env python3
 
-# Server can actually only consist of one process since it's UDP connection, and only filter out valid packets
-# Loop looks as follows:
-#   1. Expect first message from client and block until it's received
-#   2. Respond by sending settings
-#   3. Expect confirmation of settings
-#   4. Expect data consisting of:
-#       Data struct of fixed size which consists of:
-#       control_flag: uint8 where 1 means data stream continues, 0 means data stream ended
-#      If no data arrived in TIMEOUT seconds, reset client  
-
 import socket
 import struct
-
 import numpy as np
 import cv2
-
 import time
-import collections 
+import collections
+
+import threading
+import queue
+
 
 HOST = 'localhost'
 PORT = 6666
 
+class CarSimListener:
+    def __init__(self, host:str=HOST, port:int=PORT, verbose:bool=True):
+        self._verbose = verbose
+        self._listener_socket = None
+        self._conn = None
+        self._bind_listen((host, port))
+        
+    def _log(self, msg:str, who:str="[Listener]"):
+        if self._verbose: print(f"{who} {msg}")
 
-class CarSimServer:
-    HELLO_SIZE          = 5
+    def _bind_listen(self, addr:tuple):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.bind(addr)
+        self._sock.listen()
+        self._log(f"Active on: {addr}")
+   
+    def await_connection(self):
+        while True:
+            self._log(f"Waiting for client...")
+            sock, addr = self._sock.accept()
+            self._conn = CarSimConnection(sock)
+            self._log(f"Opening connection with {addr}")
+            self._conn.wait()
+            self._log(f"Closing connection with {addr}")
+            
+        
+class CarSimConnection:
     DATA_HEADER_SIZE    = 4
     CAMERA_DATA_SIZE    = 3145728
     
-    def __init__(self, host=HOST, port=PORT, verbose=True):
-        self._client_connected = False
-        self._client_addr = None
+    def __init__(self, sock, verbose=True):
         self._verbose = verbose
+        self._sock = sock
         
-        self._sock = None
-        self._conn = None
-        self._open_socket(host, port)
-       
+        self._data_queue = queue.Queue(maxsize=2)
+        self._receive_thread = threading.Thread(
+            target=self.receive_loop, daemon=True)
+        self._receive_thread.start()
+        self._render_thread = threading.Thread(
+            target=self.render_loop, daemon=True)
+        self._render_thread.start()
+                
     def __del__(self):
-        self._close_socket()
-      
-    def _open_socket(self, host, port):
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        addr = (host, port)
-        self._sock.bind(addr)
-        self._sock.listen()
-        if self._verbose: print(f"[Server] Listening on {addr}")
-    
-    def _close_socket(self):
+        self._close()
+
+    def _close(self):
         if self._sock is None:
             return
         try:
-            if self._verbose: print(f"[Server] Closing socket...")
+            self._log(f"Closing socket...")
             self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
-            if self._verbose: print(f"[Server] Socket closed")
+            self._log(f"Socket closed")
         except OSError:
             pass
-        
-    def _recv_hello(self):
-        if self._verbose: print(f"[Server] Waiting for client...")
-        
-        self._conn, addr = self._sock.accept()
-        data = self._recv_all(CarSimServer.HELLO_SIZE)
-        if data != b"hello":
-            if self._verbose: print(f"[Server] Invalid client hello from: {addr}")
-            return False
-        self._client_connected = True
-        self._client_addr = addr
-        if self._verbose: print(f"[Server] Client connected: {addr}")
-        return self._client_connected
+    
+    def _log(self, msg:str, who:str="[Conn]"):
+        if self._verbose: print(f"{who} {msg}")
     
     def _send_settings(self):
-        if self._verbose: print(f"[Server] Sending settings...")
-        sent = self._conn.sendall(b"settings")
-        if self._verbose: print(f"[Server] Settings sent ({sent} B)")
-    
-    def _recv_data(self):
-        header = self._recv_all(CarSimServer.DATA_HEADER_SIZE)
-        payload_size, = self._parse_data_header(header)
-        if payload_size == 0:
-            return None
-        payload = self._recv_all(payload_size)
-        payload_parsed = self._parse_data_payload(payload)
-        # if self._verbose: print("[Server] Recved data of {} B".format(CarSimServer.CAMERA_DATA_SIZE))
-        return payload_parsed
-    
+        self._log(f"Sending settings...")
+        self._sock.sendall(b"settings")
+
     def _recv_all(self, size):
         data = b''
         while len(data) < size:
-            more = self._conn.recv(size - len(data))
+            more = self._sock.recv(size - len(data))
             if not more:
                 raise IOError('Socket closed before all data received')
             data += more
         return data
     
     def _parse_data_header(self, header: bytes):
-        return struct.unpack("i", header)
+        payload_size, = struct.unpack("i", header)
+        return payload_size
         
     def _parse_data_payload(self, payload: bytes):
         # 8-bit 1024x1024 image
@@ -104,37 +96,54 @@ class CarSimServer:
         image = image.reshape((1024, 1024, 3))
         return image
     
-    def loop(self, target:callable=None):
-        self._recv_hello()
-        if not self._client_connected:
-            return
+    def _recv_data(self):
+        header = self._recv_all(self.__class__.DATA_HEADER_SIZE)
+        payload_size = self._parse_data_header(header)
+        if payload_size == 0:
+            return None
+        payload = self._recv_all(payload_size)
+        payload_parsed = self._parse_data_payload(payload)
+        return payload_parsed
+
+    def receive_loop(self):
         self._send_settings()
-        
-        frame_times = collections.deque(maxlen=120)      
+        MAXLEN = 60
+        frame_times = collections.deque(maxlen=MAXLEN)
+        counter = 0
+        time.sleep(0.1) # To prevent exiting due to is_alive()
         while True:
+            if not self._render_thread.is_alive():
+                break
             start_time = time.time()
             data = self._recv_data()
+            self._data_queue.put(data)
             frame_time = time.time() - start_time
             frame_times.append(frame_time)
-            avg_fps = len(frame_times) / sum(frame_times)
-            print(avg_fps)
-            if target:
-                target(data)
-  
-  
+            counter = (counter + 1) % MAXLEN
+            if counter == MAXLEN-1:
+                avg_fps = len(frame_times) / sum(frame_times)
+                self._log(f"Recv FPS: {avg_fps}")
+    
+    def render_loop(self):
+        cv2.namedWindow("Feed Video", cv2.WINDOW_NORMAL)
+        time.sleep(0.1) # To prevent exiting due to is_alive()
+        while True:
+            if not self._receive_thread.is_alive():
+                break
+            data = self._data_queue.get()
+            cv2.imshow("Feed Video", data)
+            cv2.waitKey(1)
+            
+    def wait(self):
+        self._receive_thread.join()
+        self._render_thread.join()
+
 
 if __name__ == "__main__":
-    cv2.namedWindow("Feed Video", cv2.WINDOW_NORMAL)
-    server = CarSimServer()
-
-    def render_image(data):
-        cv2.imshow("Feed Video",data)
-        cv2.waitKey(1)
-
-    
+    server = CarSimListener()
 
     try:
-        server.loop(target=render_image)
+        server.await_connection()
     except KeyboardInterrupt:
         print("[Main] Exiting...")
         pass
