@@ -18,6 +18,7 @@ import queue
 import time
 import numpy as np
 import socket
+import cv2
 
 HOST = 'localhost'
 PORT = 6666
@@ -28,9 +29,8 @@ CAMERA_DATA_SIZE    = 3145728
 
 def game_thread():
     while True:
-        data = np.random.randint(low=0, high=256, size=(1024, 1024, 3), dtype=np.uint8)
-        # Flatten the array and put it in the queue
-        DATA_QUEUE.put(data.flatten(), block=True)
+        data = np.random.randint(low=0, high=256, size=CAMERA_DATA_SIZE, dtype=np.uint8)
+        DATA_QUEUE.put(data, block=True)
 
 def data_thread():
     addr = (HOST, PORT)
@@ -42,10 +42,10 @@ def data_thread():
         print(f"[Data] Received settings: {settings}")
         while True:
             data = DATA_QUEUE.get()
-            bool_byte = np.array([True], dtype=bool)
-            data_with_header = np.append(bool_byte.view(np.uint8), data)
-            print(len(data_with_header))
-            s.sendall(data_with_header)
+            print(data.size)
+            s.sendall(data.size.to_bytes(4, 'little'))
+            s.sendall(data)
+
         
 
 data_t = threading.Thread(target=data_thread)

@@ -25,7 +25,7 @@ PORT = 6666
 
 class CarSimServer:
     HELLO_SIZE          = 5
-    DATA_HEADER_SIZE    = 1
+    DATA_HEADER_SIZE    = 4
     CAMERA_DATA_SIZE    = 3145728
     
     def __init__(self, host=HOST, port=PORT, verbose=True):
@@ -78,10 +78,10 @@ class CarSimServer:
     
     def _recv_data(self):
         header = self._recv_all(CarSimServer.DATA_HEADER_SIZE)
-        is_client_online = self._parse_data_header(header)
-        if not is_client_online:
+        payload_size, = self._parse_data_header(header)
+        if payload_size == 0:
             return None
-        payload = self._recv_all(CarSimServer.CAMERA_DATA_SIZE)
+        payload = self._recv_all(payload_size)
         payload_parsed = self._parse_data_payload(payload)
         # if self._verbose: print("[Server] Recved data of {} B".format(CarSimServer.CAMERA_DATA_SIZE))
         return payload_parsed
@@ -96,12 +96,12 @@ class CarSimServer:
         return data
     
     def _parse_data_header(self, header: bytes):
-        return struct.unpack("?", header)
+        return struct.unpack("i", header)
         
     def _parse_data_payload(self, payload: bytes):
         # 8-bit 1024x1024 image
         image = np.frombuffer(payload, dtype=np.uint8)
-        image = image.reshape(1024,1024,3)
+        image = image.reshape((1024, 1024, 3))
         return image
     
     def loop(self, target:callable=None):
