@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from ctypes import WinError
 import socket
 import struct
 import numpy as np
@@ -13,6 +14,28 @@ import queue
 
 HOST = 'localhost'
 PORT = 6666
+
+class PerformanceMonitor:
+    WINDOW_LENGTH = 60
+    
+    def __init__(self, avg_window_len=WINDOW_LENGTH):
+        self._frame_times = collections.deque(maxlen=avg_window_len)
+        self._counter:int = 0
+    
+    def __call__(self, frame_time):
+        self._frame_times.append(frame_time)
+        self._counter += 1
+        if self._counter == self.__class__.WINDOW_LENGTH:
+            avg_fps = len(self._frame_times) / sum(self._frame_times)
+            print(f"FPS: {avg_fps}")
+            self._counter = 0
+            
+    def start(self):
+        self._start_time = time.time()
+        
+    def end(self):
+        self(time.time() - self._start_time)
+
 
 class CarSimListener:
     def __init__(self, host:str=HOST, port:int=PORT, verbose:bool=True):
@@ -34,8 +57,8 @@ class CarSimListener:
         while True:
             self._log(f"Waiting for client...")
             sock, addr = self._sock.accept()
-            self._conn = CarSimConnection(sock)
             self._log(f"Opening connection with {addr}")
+            self._conn = CarSimConnection(sock)
             self._conn.wait()
             self._log(f"Closing connection with {addr}")
             
@@ -49,11 +72,11 @@ class CarSimConnection:
         self._sock = sock
         
         self._data_queue = queue.Queue(maxsize=2)
-        self._receive_thread = threading.Thread(
-            target=self.receive_loop, daemon=True)
+        self._receive_thread_started = threading.Event()
+        self._render_thread_started = threading.Event()
+        self._receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
         self._receive_thread.start()
-        self._render_thread = threading.Thread(
-            target=self.render_loop, daemon=True)
+        self._render_thread = threading.Thread(target=self.render_loop, daemon=True)
         self._render_thread.start()
                 
     def __del__(self):
@@ -106,37 +129,40 @@ class CarSimConnection:
         return payload_parsed
 
     def receive_loop(self):
+        self._receive_thread_started.set()
+        self._render_thread_started.wait()
         self._send_settings()
-        MAXLEN = 60
-        frame_times = collections.deque(maxlen=MAXLEN)
-        counter = 0
-        time.sleep(0.1) # To prevent exiting due to is_alive()
         while True:
             if not self._render_thread.is_alive():
                 break
-            start_time = time.time()
-            data = self._recv_data()
-            self._data_queue.put(data)
-            frame_time = time.time() - start_time
-            frame_times.append(frame_time)
-            counter = (counter + 1) % MAXLEN
-            if counter == MAXLEN-1:
-                avg_fps = len(frame_times) / sum(frame_times)
-                self._log(f"Recv FPS: {avg_fps}")
+            try:
+                data = self._recv_data()
+                self._data_queue.put(data)
+            except OSError:
+                self._log("Connection closed by client")
+                break
     
     def render_loop(self):
+        self._render_thread_started.set()
+        self._receive_thread_started.wait()
         cv2.namedWindow("Feed Video", cv2.WINDOW_NORMAL)
-        time.sleep(0.1) # To prevent exiting due to is_alive()
         while True:
             if not self._receive_thread.is_alive():
+                cv2.destroyAllWindows()
                 break
-            data = self._data_queue.get()
-            cv2.imshow("Feed Video", data)
-            cv2.waitKey(1)
+            try:
+                data = self._data_queue.get(timeout=1)
+                cv2.imshow("Feed Video", data)
+                cv2.waitKey(1)
+            except queue.Empty:
+                cv2.destroyAllWindows()
             
     def wait(self):
+        self._log(f"Waiting for recv thread to finish...")
         self._receive_thread.join()
+        self._log(f"Waiting for render thread to finish...")
         self._render_thread.join()
+        self._log(f"Threads finished")
 
 
 if __name__ == "__main__":
