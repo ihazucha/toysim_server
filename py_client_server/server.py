@@ -13,28 +13,15 @@ import queue
 
 
 HOST = 'localhost'
-PORT = 6666
+PORT = 3333
 
-class PerformanceMonitor:
-    WINDOW_LENGTH = 60
-    
-    def __init__(self, avg_window_len=WINDOW_LENGTH):
-        self._frame_times = collections.deque(maxlen=avg_window_len)
-        self._counter:int = 0
-    
-    def __call__(self, frame_time):
-        self._frame_times.append(frame_time)
-        self._counter += 1
-        if self._counter == self.__class__.WINDOW_LENGTH:
-            avg_fps = len(self._frame_times) / sum(self._frame_times)
-            print(f"FPS: {avg_fps}")
-            self._counter = 0
-            
-    def start(self):
-        self._start_time = time.time()
-        
-    def end(self):
-        self(time.time() - self._start_time)
+CAMERA_X = 640
+CAMERA_Y = 480
+CAMERA_PIXEL_COMPONENTS = 4
+CAMERA_FRAME_SIZE = CAMERA_X * CAMERA_Y * CAMERA_PIXEL_COMPONENTS
+
+alpha = 3 # Contrast control (1.0-3.0)
+beta = 20   # Brightness control (0-100)
 
 
 class CarSimListener:
@@ -64,9 +51,6 @@ class CarSimListener:
             
         
 class CarSimConnection:
-    DATA_HEADER_SIZE    = 4
-    CAMERA_DATA_SIZE    = 3145728
-    
     def __init__(self, sock, verbose=True):
         self._verbose = verbose
         self._sock = sock
@@ -114,24 +98,19 @@ class CarSimConnection:
         return payload_size
         
     def _parse_data_payload(self, payload: bytes):
-        # 8-bit 1024x1024 image
         image = np.frombuffer(payload, dtype=np.uint8)
-        image = image.reshape((1024, 1024, 3))
+        image = image.reshape((CAMERA_Y, CAMERA_X, CAMERA_PIXEL_COMPONENTS))
         return image
     
     def _recv_data(self):
-        header = self._recv_all(self.__class__.DATA_HEADER_SIZE)
-        payload_size = self._parse_data_header(header)
-        if payload_size == 0:
-            return None
-        payload = self._recv_all(payload_size)
+        payload = self._recv_all(CAMERA_FRAME_SIZE)
         payload_parsed = self._parse_data_payload(payload)
         return payload_parsed
 
     def receive_loop(self):
         self._receive_thread_started.set()
         self._render_thread_started.wait()
-        self._send_settings()
+        # self._send_settings()
         while True:
             if not self._render_thread.is_alive():
                 break
@@ -152,10 +131,12 @@ class CarSimConnection:
                 break
             try:
                 data = self._data_queue.get(timeout=1)
-                cv2.imshow("Feed Video", data)
+                bgr_image_data = cv2.cvtColor(data, cv2.COLOR_RGBA2BGR)
+                light_adjusted = cv2.convertScaleAbs(bgr_image_data, alpha=alpha, beta=beta)
+                cv2.imshow("Feed Video", light_adjusted)
                 cv2.waitKey(1)
             except queue.Empty:
-                cv2.destroyAllWindows()
+                pass
             
     def wait(self):
         self._log(f"Waiting for recv thread to finish...")

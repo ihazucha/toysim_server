@@ -1,64 +1,52 @@
 #!/usr/bin/env python3
 
+from math import floor
 import socket
 import struct
 import numpy as np
 import cv2
-import time
-import collections
 
-import threading
-import queue
+from threading import Event
+from queue import Queue
+
+from RoboSim.render import ImageDataRenderer
 
 
-HOST = 'localhost'
-PORT = 3333
-ADDR = (HOST, PORT)
+RECEIVER_HOST = 'localhost'
+RECEIVER_PORT = 3333
+RECEIVER_ADDR = (RECEIVER_HOST, RECEIVER_PORT)
 
-CLIENT_ADDR = (HOST, 6666)
+SENDER_HOST = 'localhost'
+SENDER_PORT = 6666
+SENDER_ADDR = (SENDER_HOST, SENDER_PORT)
 
-class PerformanceMonitor:
-    WINDOW_LENGTH = 60
-    
-    def __init__(self, avg_window_len=WINDOW_LENGTH):
-        self._frame_times = collections.deque(maxlen=avg_window_len)
-        self._counter:int = 0
-    
-    def __call__(self, frame_time):
-        self._frame_times.append(frame_time)
-        self._counter += 1
-        if self._counter == self.__class__.WINDOW_LENGTH:
-            avg_fps = len(self._frame_times) / sum(self._frame_times)
-            print(f"FPS: {avg_fps}")
-            self._counter = 0
-            
-    def start(self):
-        self._start_time = time.time()
-        
-    def end(self):
-        self(time.time() - self._start_time)
+DFRAME_PAYLOAD_SIZE = 3145728
+DFRAME_TOTAL_SIZE   = DFRAME_PAYLOAD_SIZE
+DFRAME_HEADER_SIZE  = 8
+UDP_BUFFER_SIZE     = 65000
+UDP_TOTAL_SIZE      = DFRAME_HEADER_SIZE + UDP_BUFFER_SIZE
 
+# TODO: possible error when DFRAME_TOTAL_SIZE is divisible by UDP_BUFFER_SIZE
+DFRAME_CHUNK_COUNT = DFRAME_TOTAL_SIZE / UDP_BUFFER_SIZE
+DFRAME_CHUNK_COUNT_FLOOR = floor(DFRAME_CHUNK_COUNT)
+DFRAME_CHUNK_HAS_REMAINDER = DFRAME_CHUNK_COUNT > DFRAME_CHUNK_COUNT_FLOOR
+DFRAME_CHUNK_COUNT_FINAL = DFRAME_CHUNK_COUNT_FLOOR + 1 if DFRAME_CHUNK_HAS_REMAINDER else DFRAME_CHUNK_COUNT_FLOOR
+DFRAME_PADDED_SIZE  = DFRAME_CHUNK_COUNT_FINAL * UDP_BUFFER_SIZE   
          
-class CarSimUdpServer:
-    DATA_HEADER_SIZE    = 4
-    CAMERA_DATA_SIZE    = 3145728
-    
-    def __init__(self, verbose=True):
+class UdpDataReceiver:
+    def __init__(self, data_queue:Queue, verbose=True):
         self._verbose = verbose
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._data_queue = data_queue
+        self._exit_event = Event()
         
-        self._data_queue = queue.Queue(maxsize=2)
-        self._receive_thread_started = threading.Event()
-        self._render_thread_started = threading.Event()
-        self._receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
-        self._receive_thread.start()
-        self._render_thread = threading.Thread(target=self.render_loop, daemon=True)
-        self._render_thread.start()
-                
-    def __del__(self):
-        self._close()
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(RECEIVER_ADDR)
 
-    def _close(self):
+    @property
+    def exit_event(self):
+        return self._exit_event
+
+    def __del__(self):
         if self._sock is None:
             return
         try:
@@ -69,78 +57,48 @@ class CarSimUdpServer:
         except OSError as e:
             print(e)
             pass
-    
-    def _log(self, msg:str, who:str="[Conn]"):
+
+    def _log(self, msg:str, who:str="[Receiver]"):
         if self._verbose: print(f"{who} {msg}")
     
-    def _send_settings(self):
-        self._log(f"Sending settings...")
-        self._sock.sendto(b"settings", CLIENT_ADDR)
-    
+
     def _parse_data_header(self, header: bytes):
         payload_size, = struct.unpack("i", header)
         return payload_size
         
-    def _parse_data_payload(self, payload: bytes):
-        # 8-bit 1024x1024 image
-        image = np.frombuffer(payload, dtype=np.uint8)
-        image = image.reshape((1024, 1024, 3))
-        return image
-    
     def _recv_data(self):
-        header = self._sock.recv(self.__class__.DATA_HEADER_SIZE)
-        payload_size = self._parse_data_header(header)
-        print(payload_size)
-        if payload_size == 0:
-            return None
-        payload = self._sock.recv(payload_size)
-        payload_parsed = self._parse_data_payload(payload)
-        return payload_parsed
+        remaining_payload_size = DFRAME_PADDED_SIZE
+        payload:bytes = b''
+        while remaining_payload_size > 0:
+            chunk, _ = self._sock.recvfrom(UDP_TOTAL_SIZE)
+            frame_counter, chunk_counter = struct.unpack("ii", chunk[:8])
+            print(f"F:{frame_counter}|C:{chunk_counter}")
+            payload += chunk[8:]
+            remaining_payload_size -= UDP_BUFFER_SIZE
+        return payload[:DFRAME_PAYLOAD_SIZE]
 
-    def receive_loop(self):
-        self._receive_thread_started.set()
-        self._render_thread_started.wait()
-        self._send_settings()
+    def loop(self):
+        # self._send_settings()
         while True:
-            if not self._render_thread.is_alive():
+            if self._exit_event.is_set():
                 break
             try:
-                print("Hop")
                 data = self._recv_data()
                 self._data_queue.put(data)
             except OSError as e:
-                print(e)
-                self._log("Connection closed by client")
+                self._log(f"Connection closed by client: {e}")
+                self._exit_event.set()
                 break
-    
-    def render_loop(self):
-        self._render_thread_started.set()
-        self._receive_thread_started.wait()
-        cv2.namedWindow("Feed Video", cv2.WINDOW_NORMAL)
-        while True:
-            if not self._receive_thread.is_alive():
-                cv2.destroyAllWindows()
-                break
-            try:
-                data = self._data_queue.get(timeout=1)
-                cv2.imshow("Feed Video", data)
-                cv2.waitKey(1)
-            except queue.Empty:
-                cv2.destroyAllWindows()
-            
-    def wait(self):
-        self._log(f"Waiting for recv thread to finish...")
-        self._receive_thread.join()
-        self._log(f"Waiting for render thread to finish...")
-        self._render_thread.join()
-        self._log(f"Threads finished")
 
 
 if __name__ == "__main__":
-
     try:
-        server = CarSimUdpServer()
-        server.wait()
+        data_queue = Queue(maxsize=1)
+        server = UdpDataReceiver(data_queue)
+        exit_event = server.exit_event
+        renderer = ImageDataRenderer(data_queue, exit_event)
+        renderer.start()
+        server.loop()
     except KeyboardInterrupt:
         print("[Main] Exiting...")
         pass
