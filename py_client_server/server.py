@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
 
-from ctypes import WinError
 import socket
-import struct
-import numpy as np
-import cv2
-import time
-import collections
+from queue import Queue
+from threading import Event
 
-import threading
-import queue
+from RoboSim.render import RendererThread, App
+from RoboSim.settings import (CAMERA_FRAME_SIZE, SERVER_HOST, SERVER_PORT)
 
+from PyQt5.QtWidgets import QApplication
+import sys
 
-HOST = 'localhost'
-PORT = 3333
-
-CAMERA_X = 640
-CAMERA_Y = 480
-CAMERA_PIXEL_COMPONENTS = 4
-CAMERA_FRAME_SIZE = CAMERA_X * CAMERA_Y * CAMERA_PIXEL_COMPONENTS
-
-alpha = 3 # Contrast control (1.0-3.0)
-beta = 20   # Brightness control (0-100)
-
-
-class CarSimListener:
-    def __init__(self, host:str=HOST, port:int=PORT, verbose:bool=True):
+class TCPListener:
+    def __init__(self, host:str=SERVER_HOST, port:int=SERVER_PORT, verbose:bool=True):
         self._verbose = verbose
         self._listener_socket = None
-        self._conn = None
+        self._client_connection = None
         self._bind_listen((host, port))
         
     def _log(self, msg:str, who:str="[Listener]"):
@@ -43,118 +29,74 @@ class CarSimListener:
     def await_connection(self):
         while True:
             self._log(f"Waiting for client...")
-            sock, addr = self._sock.accept()
-            self._log(f"Opening connection with {addr}")
-            self._conn = CarSimConnection(sock)
-            self._conn.wait()
-            self._log(f"Closing connection with {addr}")
+            socket, addr = self._sock.accept()
+            self._log(f"Connected: {addr}")
+            data_queue = Queue(maxsize=2)
+            exit_event = Event()
+            connection = TCPConnection(socket, data_queue, exit_event, verbose=self._verbose)
             
+            app = QApplication(sys.argv)
+            ex = App(data_queue, exit_event)
+            # renderer = RendererThread(data_queue, exit_event, verbose=self._verbose)
+            # renderer.start()
+            print("Connection loop start")
+            connection.receive_loop()
+            # renderer.join()
+            self._log(f"Disconnected: {addr}")
         
-class CarSimConnection:
-    def __init__(self, sock, verbose=True):
+class TCPConnection:
+    def __init__(self, socket, data_queue, exit_event, verbose=True):
+        self._socket = socket
+        self._data_queue = data_queue
+        self._exit_event = exit_event
         self._verbose = verbose
-        self._sock = sock
-        
-        self._data_queue = queue.Queue(maxsize=2)
-        self._receive_thread_started = threading.Event()
-        self._render_thread_started = threading.Event()
-        self._receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
-        self._receive_thread.start()
-        self._render_thread = threading.Thread(target=self.render_loop, daemon=True)
-        self._render_thread.start()
-                
+              
     def __del__(self):
         self._close()
 
-    def _close(self):
-        if self._sock is None:
-            return
-        try:
-            self._log(f"Closing socket...")
-            self._sock.shutdown(socket.SHUT_RDWR)
-            self._sock.close()
-            self._log(f"Socket closed")
-        except OSError:
-            pass
-    
     def _log(self, msg:str, who:str="[Conn]"):
         if self._verbose: print(f"{who} {msg}")
-    
-    def _send_settings(self):
-        self._log(f"Sending settings...")
-        self._sock.sendall(b"settings")
+
+    def _close(self):
+        if self._socket is None:
+            return
+        try:
+            self._log(f"Closing cocket...")
+            self._socket.shutdown(socket.SHUT_RDWR)
+            self._socket.close()
+            self._log(f"Socket closed")
+        except OSError as e:
+            self._log(f"Error while closing socket: {e}")
+            pass
 
     def _recv_all(self, size):
         data = b''
         while len(data) < size:
-            more = self._sock.recv(size - len(data))
+            more = self._socket.recv(size - len(data))
             if not more:
                 raise IOError('Socket closed before all data received')
             data += more
         return data
-    
-    def _parse_data_header(self, header: bytes):
-        payload_size, = struct.unpack("i", header)
-        return payload_size
         
-    def _parse_data_payload(self, payload: bytes):
-        image = np.frombuffer(payload, dtype=np.uint8)
-        image = image.reshape((CAMERA_Y, CAMERA_X, CAMERA_PIXEL_COMPONENTS))
-        return image
-    
     def _recv_data(self):
-        payload = self._recv_all(CAMERA_FRAME_SIZE)
-        payload_parsed = self._parse_data_payload(payload)
-        return payload_parsed
+        return self._recv_all(CAMERA_FRAME_SIZE)
 
     def receive_loop(self):
-        self._receive_thread_started.set()
-        self._render_thread_started.wait()
-        # self._send_settings()
         while True:
-            if not self._render_thread.is_alive():
-                break
             try:
                 data = self._recv_data()
                 self._data_queue.put(data)
             except OSError:
                 self._log("Connection closed by client")
                 break
-    
-    def render_loop(self):
-        self._render_thread_started.set()
-        self._receive_thread_started.wait()
-        cv2.namedWindow("Feed Video", cv2.WINDOW_NORMAL)
-        while True:
-            if not self._receive_thread.is_alive():
-                cv2.destroyAllWindows()
-                break
-            try:
-                data = self._data_queue.get(timeout=1)
-                bgr_image_data = cv2.cvtColor(data, cv2.COLOR_RGBA2BGR)
-                light_adjusted = cv2.convertScaleAbs(bgr_image_data, alpha=alpha, beta=beta)
-                cv2.imshow("Feed Video", light_adjusted)
-                cv2.waitKey(1)
-            except queue.Empty:
-                pass
-            
-    def wait(self):
-        self._log(f"Waiting for recv thread to finish...")
-        self._receive_thread.join()
-        self._log(f"Waiting for render thread to finish...")
-        self._render_thread.join()
-        self._log(f"Threads finished")
+        self._exit_event.set()
 
 
+# Main
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    server = CarSimListener()
-
+    server = TCPListener()
     try:
         server.await_connection()
     except KeyboardInterrupt:
         print("[Main] Exiting...")
-        pass
-    finally:
-        print("[Main] Cleanup...")
-        del server
-        cv2.destroyAllWindows()
