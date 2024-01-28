@@ -4,11 +4,9 @@ import socket
 from queue import Queue
 from threading import Event
 
-from RoboSim.render import RendererThread, App
+from RoboSim.render import RendererThread
 from RoboSim.settings import (CAMERA_FRAME_SIZE, SERVER_HOST, SERVER_PORT)
 
-from PyQt5.QtWidgets import QApplication
-import sys
 
 class TCPListener:
     def __init__(self, host:str=SERVER_HOST, port:int=SERVER_PORT, verbose:bool=True):
@@ -34,14 +32,10 @@ class TCPListener:
             data_queue = Queue(maxsize=2)
             exit_event = Event()
             connection = TCPConnection(socket, data_queue, exit_event, verbose=self._verbose)
-            
-            app = QApplication(sys.argv)
-            ex = App(data_queue, exit_event)
-            # renderer = RendererThread(data_queue, exit_event, verbose=self._verbose)
-            # renderer.start()
-            print("Connection loop start")
+            renderer = RendererThread(data_queue, exit_event, verbose=self._verbose)
+            renderer.start()
             connection.receive_loop()
-            # renderer.join()
+            renderer.join()
             self._log(f"Disconnected: {addr}")
         
 class TCPConnection:
