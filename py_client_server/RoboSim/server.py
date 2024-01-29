@@ -93,10 +93,35 @@ class TcpConnection:
         return self._recv_all(RECV_DATA_SIZE)
 
     def receive_loop(self):
-        while True:
-            try:
-                data = self._recv_data()
-                self._recv_queue.put(data)
-            except OSError:
-                self._log("Connection closed by client")
-                break
+        exit_event = Event()
+        def send_data():
+            while not exit_event.is_set():
+                try:
+                    data = self._send_queue.get()
+                    self._socket.sendall(data)
+                except OSError:
+                    self._log("Send failed - connection closed by client")
+                    break
+                    
+
+        def recv_data():
+            while True:
+                try:
+                    data = self._recv_data()
+                    self._recv_queue.put(data)
+                except OSError:
+                    self._log("Recv failed - connection closed by client")
+                    break
+                exit_event.set()
+        
+        # Create and start the receiving thread
+        recv_thread = Thread(target=recv_data)
+        recv_thread.start()
+        
+        # Create and start the sending thread
+        send_thread = Thread(target=send_data)
+        send_thread.start()
+        
+        send_thread.join()
+        recv_thread.join()
+

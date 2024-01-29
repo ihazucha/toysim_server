@@ -1,6 +1,6 @@
 import numpy as np
+import struct
 
-from struct import unpack
 from queue import Queue, Full
 from threading import Event, Thread
 
@@ -34,7 +34,7 @@ class Processor:
             self._connected_event.wait()
             # Data queue
             data_bytes = self._data_queue.get()
-            speed, steering_angle = unpack("ff", data_bytes[:8])
+            speed, steering_angle = struct.unpack("ff", data_bytes[:8])
             image_data_bytes = data_bytes[8:]
             image_data_np = np.frombuffer(image_data_bytes, dtype=np.uint8)
             image_rgba = image_data_np.reshape(
@@ -42,11 +42,14 @@ class Processor:
             )
 
             # Control queue
-            new_speed, new_steering_angle = speed + 0.001, steering_angle + 0.01
+            new_speed = speed / 2
+            new_steering_angle = steering_angle / 2
             try:
-                self._control_queue.put((new_speed, new_steering_angle), block=False)
+                control_data_bytes = struct.pack('ff', new_speed, new_steering_angle)
+                self._control_queue.put(control_data_bytes, block=False)
             except Full:
                 pass
+            
             # Render queue
             self._render_queue.put(
                 (speed, new_speed, steering_angle, new_steering_angle, image_rgba)

@@ -37,9 +37,28 @@ class DummyData:
 def tcp_data_sender():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect(SERVER_ADDR)
-        while True:
-            data = DATA_QUEUE.get()
-            s.sendall(data)
+        
+        def send_data():
+            while True:
+                data = DATA_QUEUE.get()
+                s.sendall(data)
+
+        def recv_data():
+            while True:
+                data = s.recv(8)
+                print(struct.unpack('ff', data))
+        
+        # Create and start the sending thread
+        send_thread = threading.Thread(target=send_data)
+        send_thread.start()
+
+        # Create and start the receiving thread
+        recv_thread = threading.Thread(target=recv_data)
+        recv_thread.start()
+
+        # Wait for both threads to finish
+        send_thread.join()
+        recv_thread.join()
 
 
 def game_thread():

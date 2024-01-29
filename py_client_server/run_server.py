@@ -16,8 +16,8 @@ if __name__ == "__main__":
     render_queue = Queue(maxsize=2)
     connected_event = Event()
 
-    bridge = TcpServer(recv_queue, send_queue, connected_event)
-    bridge.start()
+    server = TcpServer(recv_queue, send_queue, connected_event)
+    server.start()
 
     processor = Processor(recv_queue, send_queue, render_queue, connected_event)
     processor.start()
