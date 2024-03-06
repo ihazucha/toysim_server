@@ -2,7 +2,7 @@ import socket
 from queue import Queue
 from threading import Event, Thread
 
-from RoboSim.settings import RECV_DATA_SIZE, SERVER_HOST, SERVER_PORT
+from RoboSim.settings import NetworkSettings
 
 
 class TcpServer:
@@ -11,8 +11,8 @@ class TcpServer:
         recv_queue: Queue,
         send_queue: Queue,
         connected_event: Event,
-        host: str = SERVER_HOST,
-        port: int = SERVER_PORT,
+        host: str = NetworkSettings.SERVER_HOST,
+        port: int = NetworkSettings.SERVER_PORT,
         verbose: bool = True,
     ):
         self._recv_queue = recv_queue
@@ -90,7 +90,8 @@ class TcpConnection:
         return data
 
     def _recv_data(self):
-        return self._recv_all(RECV_DATA_SIZE)
+        print(NetworkSettings.RECV_DATA_SIZE_BYTES)
+        return self._recv_all(NetworkSettings.RECV_DATA_SIZE_BYTES)
 
     def receive_loop(self):
         exit_event = Event()
@@ -124,4 +125,3 @@ class TcpConnection:
         
         send_thread.join()
         recv_thread.join()
-

@@ -6,12 +6,12 @@ from collections import deque
 from queue import Queue, Empty
 
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QImage, QPixmap, QColor
+from PySide6.QtGui import QImage, QPixmap, QColor, QPen, QBrush, QLinearGradient
 from PySide6.QtWidgets import QApplication, QGridLayout, QLabel, QWidget
 import pyqtgraph as pg
 
-from .settings import CAMERA_X, CAMERA_Y
-
+from .settings import SimulationCameraSettings
+from .processor import SimulationDataFrame, ControlDataFrame
 
 FPS = 60
 DTIME = 1 / FPS
@@ -54,50 +54,45 @@ class RendererDataThread(QThread):
         CLIP = 7500
         while self._is_running:
             try:
-                (
-                    speed,
-                    speed_setpoint,
-                    steering,
-                    steering_setpoint,
-                    image_rgba,
-                ) = self._data_queue.get(timeout=1)
+                render_queue_data = self._data_queue.get(timeout=1)
+                simulation_data:SimulationDataFrame = render_queue_data[0]
+                control_data:ControlDataFrame = render_queue_data[1]
             except Empty:
                 continue
 
-            image_rgb = cv2.cvtColor(image_rgba[:,:,0:3], cv2.COLOR_RGBA2RGB)
-            # TODO: move to settings
             # image_rgb = cv2.convertScaleAbs(image_rgb, alpha=ALPHA, beta=BETA)
-            qimage_rgb = QImage(
-                image_rgb, CAMERA_X, CAMERA_Y, QImage.Format_RGB888
-            )
+            qimage_rgb = QImage(simulation_data.camera_frame_rgb, SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT, QImage.Format_RGB888)
 
-            byte1 = image_rgba[:, :, 3].astype(np.uint16)
-            byte2 = image_rgba[:, :, 4].astype(np.uint16)
-            combined = (byte2 << 8) | byte1
-            float_data = combined.view(np.float16)
-            clipped_float_data = np.clip(float_data, 0, CLIP)
+            # byte1 = image_rgba[:, :, 3].astype(np.uint16)
+            # byte2 = image_rgba[:, :, 4].astype(np.uint16)
+            # combined = (byte2 << 8) | byte1
+            # float_data = combined.view(np.float16)
+            clipped_float_data = np.clip(simulation_data.camera_frame_depth, 0, CLIP)
             normalized_data = clipped_float_data / CLIP
             int8_data = (normalized_data * 255).astype(np.uint8)
             depth_map = cv2.applyColorMap(int8_data, cv2.COLORMAP_JET)
             qimage_depth = QImage(
                 depth_map.data,
-                CAMERA_X,
-                CAMERA_Y,
+                SimulationCameraSettings.WIDTH,
+                SimulationCameraSettings.HEIGHT,
                 QImage.Format.Format_RGB888
             )
 
             # Emit
             self.data_ready.emit(
                 (
-                    speed,
-                    speed_setpoint,
-                    steering,
-                    steering_setpoint,
+                    simulation_data.speed,
+                    control_data.speed_setpoint,
+                    simulation_data.steering_angle,
+                    control_data.steering_angle_setpoint,
+                    simulation_data.pose.position.x,
+                    simulation_data.pose.position.y,
+                    simulation_data.pose.rotation.yaw,
                     qimage_rgb,
                     qimage_depth,
                 )
             )
-            time.sleep(self._dtime)
+            # time.sleep(self._dtime)
 
     def stop(self):
         self._is_running = False
@@ -116,13 +111,15 @@ class RendererApp(QWidget):
         # Plotting
         # ---------------------------------------
         self.rgb_label = QLabel(self)
+        self.rgb_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.rgb_pixmap = QPixmap()
 
         self.depth_label = QLabel(self)
+        self.depth_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.depth_pixmap = QPixmap()
 
         self.speed_plot = pg.PlotWidget()
-        self.speed_plot.setMinimumSize(640, 480)
+        self.speed_plot.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.speed_plot.setXRange(-DATA_QUEUE_SIZE, 0)
         self.speed_plot.setYRange(-1, 1)
         self.speed_plot.getAxis("bottom").setTicks(STEP_TICKS)
@@ -152,7 +149,7 @@ class RendererApp(QWidget):
         )
 
         self.steering_plot = pg.PlotWidget()
-        self.steering_plot.setMinimumSize(640, 480)
+        self.steering_plot.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.steering_plot.setXRange(-40, 40)
         self.steering_plot.getAxis("left").setTicks(STEP_TICKS)
         self.steering_plot.getPlotItem().showGrid(x=True, y=True)
@@ -181,13 +178,45 @@ class RendererApp(QWidget):
             pen=pg.mkPen(QColor(255, 0, 0, 128), style=Qt.DashLine),
             name="Setpoint"
         )
+        
+        self.map_plot = pg.PlotWidget()
+        self.map_plot.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)  # Adjust the size as needed
+        self.map_plot.setXRange(-8000, 8000)  # Adjust the range as needed
+        self.map_plot.setYRange(-8000, 8000)  # Adjust the range as needed
+        self.map_plot.getPlotItem().showGrid(x=True, y=True)
+        self.map_plot.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
+        self.arrow = pg.ArrowItem(angle=90, tipAngle=30, baseAngle=20, headLen=20, tailLen=10, headWidth=10, tailWidth=4, pen={'color': 'g', 'width': 2})
+        self.map_plot.addItem(self.arrow)
+        self.arrow.setZValue(1)
+        
+        # Create a deque to store the past positions
+        self.map_plot_positions_x = deque(maxlen=DATA_QUEUE_SIZE)
+        self.map_plot_positions_y = deque(maxlen=DATA_QUEUE_SIZE)
+
+        # Create a PlotCurveItem to represent the path
+        self.path = pg.PlotCurveItem(pen=pg.mkPen(QColor(255, 255, 255, 255), width=2, style=Qt.DashLine))
+        gradient = QLinearGradient(0, 0, 0, 1)
+        gradient.setColorAt(0, QColor(255, 255, 255, 255))
+        gradient.setColorAt(1, QColor(255, 255, 255, 64))
+        self.path.setBrush(QBrush(gradient))
+        
+        self.map_plot.addItem(self.path)
+        
 
         layout = QGridLayout(self)
+        
+        # layout.addWidget(self.map_plot, 0, 0)
+        # layout.addWidget(self.rgb_label, 0, 1)
+        # layout.addWidget(self.depth_label, 1, 1)
+        # layout.addWidget(self.speed_plot, 0, 2)
+        # layout.addWidget(self.steering_plot, 1, 2)
+        
         layout.addWidget(self.rgb_label, 0, 0)
         layout.addWidget(self.depth_label, 1, 0)
         layout.addWidget(self.speed_plot, 0, 1)
         layout.addWidget(self.steering_plot, 1, 1)
-        self.setStyleSheet("background-color: #222222;")
+        self.setStyleSheet("background-color: #2d2a2e;")
+        
 
     def update_image(self, data):
         (
@@ -195,6 +224,9 @@ class RendererApp(QWidget):
             speed_setpoint,
             steering,
             steering_setpoint,
+            x,
+            y,
+            yaw,
             qimage_rgb,
             qimage_depth,
         ) = data
@@ -218,6 +250,14 @@ class RendererApp(QWidget):
         self.steering_setpoint_plot_data.setData(
             self.steering_setpoint_data, PLOT_TIME_STEPS
         )
+        # Arrow
+        self.arrow.setPos(y, x)
+        self.arrow.setStyle(angle=yaw+90)
+        # Add the new position to the deque
+        self.map_plot_positions_x.append(x)
+        self.map_plot_positions_y.append(y)
+
+        self.path.setData(list(self.map_plot_positions_y), list(self.map_plot_positions_x))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
