@@ -2,7 +2,7 @@ import socket
 from queue import Queue
 from threading import Event, Thread
 
-from RoboSim.settings import NetworkSettings
+from ToySim.settings import NetworkSettings
 
 
 class TcpServer:
@@ -90,7 +90,6 @@ class TcpConnection:
         return data
 
     def _recv_data(self):
-        print(NetworkSettings.RECV_DATA_SIZE_BYTES)
         return self._recv_all(NetworkSettings.RECV_DATA_SIZE_BYTES)
 
     def receive_loop(self):

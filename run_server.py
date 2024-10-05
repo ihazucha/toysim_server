@@ -4,9 +4,9 @@ import sys
 from queue import Queue
 from threading import Event
 
-from RoboSim.server import TcpServer
-from RoboSim.processor import Processor
-from RoboSim.render import Renderer
+from ToySim.server import TcpServer
+from ToySim.processor import Processor
+from ToySim.render import Renderer
 
 # Main
 # -----------------------------------------------------------------------------

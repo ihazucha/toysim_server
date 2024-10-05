@@ -104,28 +104,28 @@ class RendererApp(QWidget):
         # Window and App
         # ---------------------------------------
         self.setWindowTitle("RoboSim Data View")
-        self.setWindowFlags(Qt.FramelessWindowHint)
+        # self.setWindowFlags(Qt.FramelessWindowHint)
 
         self._drag_pos = None
 
         # Plotting
         # ---------------------------------------
         self.rgb_label = QLabel(self)
-        self.rgb_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
+        # self.rgb_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.rgb_pixmap = QPixmap()
 
         self.depth_label = QLabel(self)
-        self.depth_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
+        # self.depth_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.depth_pixmap = QPixmap()
 
         self.speed_plot = pg.PlotWidget()
         self.speed_plot.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
         self.speed_plot.setXRange(-DATA_QUEUE_SIZE, 0)
-        self.speed_plot.setYRange(-1, 1)
+        # self.speed_plot.setYRange(-1, 1)
         self.speed_plot.getAxis("bottom").setTicks(STEP_TICKS)
         self.speed_plot.getPlotItem().showGrid(x=True, y=True)
         self.speed_plot.getPlotItem().setTitle("Speed")
-        self.speed_plot.getPlotItem().setLabel("left", "Speed [actual/max]")
+        self.speed_plot.getPlotItem().setLabel("left", "Speed [cm/s]")
         self.speed_plot.getPlotItem().setLabel("bottom", f"Step [n] (s = {FPS} steps)")
         self.speed_marker = pg.ScatterPlotItem(size=5, pen=pg.mkPen(None), brush="w")
         self.speed_marker.setZValue(1)

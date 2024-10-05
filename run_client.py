@@ -5,9 +5,8 @@ import queue
 import numpy as np
 import socket
 import os
-import time
 import struct
-from RoboSim.settings import CAMERA_PIXEL_COMPONENTS, CAMERA_X, CAMERA_Y, SERVER_ADDR, RENDER_DTIME
+from ToySim.settings import CAMERA_PIXEL_COMPONENTS, CAMERA_X, CAMERA_Y, SERVER_ADDR, RENDER_DTIME
 
 DATA_QUEUE = queue.Queue(maxsize=1)
 
