@@ -6,45 +6,100 @@ import numpy as np
 import socket
 import os
 import struct
-from ToySim.settings import CAMERA_PIXEL_COMPONENTS, CAMERA_X, CAMERA_Y, SERVER_ADDR, RENDER_DTIME
+import time
+from datetime import datetime
+from ToySim.settings import SimulationCameraSettings as Cam, SimulationDataSizesBytes as Sizes, RenderLoopSettings, NetworkSettings, VehicleCamera, ClientTypes
+from ToySim.processor import EncoderData, IMUData, Position, Rotation, SimulationDataFrame, VehicleDataFrame, Pose
+import math
+import signal
+
+stop_threads = False
+
+def signal_handler(sig, frame):
+    global stop_threads
+    stop_threads = True
+
+signal.signal(signal.SIGINT, signal_handler)
 
 DATA_QUEUE = queue.Queue(maxsize=1)
 
-
-class DummyData:
+class SimulationDummyData:
     def __init__(self):
         self._counter = 0
-        self._time_step = 0
+        self._time = 0
 
     def __call__(self):
-        data = np.zeros((CAMERA_Y, CAMERA_X, CAMERA_PIXEL_COMPONENTS), dtype=np.uint8)
-        data[self._counter : self._counter + 10, :, 1] = 255
-        self._counter = (self._counter + 5) % CAMERA_Y
+        generator_start = datetime.now().timestamp()
+        
+        data_frame = SimulationDataFrame()
+        
+        data_frame.camera_frame_rgb = np.zeros((Cam.HEIGHT, Cam.WIDTH, Sizes.Camera.RGB_PIXEL), dtype=np.uint8)        
+        data_frame.camera_frame_rgb[self._counter : self._counter + 10, :, 1] = 255
+        data_frame.camera_frame_depth = np.zeros((Cam.HEIGHT, Cam.WIDTH), dtype=np.float16)
+        data_frame.camera_frame_depth[self._counter : self._counter + 10] = 30
 
-        speed = np.sin(self._time_step)
-        steering_angle = 40 * np.sin(self._time_step)
+        data_frame.render_enqueued_unix_timestamp = time.time_ns()
+        data_frame.render_finished_unix_timestamp = time.time_ns()
+        data_frame.game_frame_number = self._counter
+        data_frame.render_frame_number = self._counter
+        data_frame.speed = math.sin(self._time)
+        data_frame.steering_angle = 40 * math.sin(self._time)
+        data_frame.pose = Pose(Position(.0, .0, .0), Rotation(.0, .0, .0))
+        time.sleep(1/60)
+        data_frame.delta_time = generator_start - datetime.now().timestamp()
 
-        self._time_step += RENDER_DTIME
+        self._counter = (self._counter + 5) % Cam.HEIGHT
+        self._time += RenderLoopSettings.RENDER_DTIME
 
-        data_bytes = b""
-        data_bytes += struct.pack("ff", speed, steering_angle)
-        data_bytes += data.tobytes()
+        return data_frame.tobytes()
 
-        return data_bytes
+class VehicleDummyData:
+    """ CameraData 
+        GyroDataRaw ([ax, ay, az], [v_roll, a_pitch, a_yaw])
+    """
+    def __init__(self):
+        self._counter = 0
+        self._time = 0
+
+    def __call__(self):
+        generator_start = datetime.now().timestamp()
+        _sin = math.sin(self._time)
+        _cos = math.cos(self._time)
+        data_frame = VehicleDataFrame()
+        
+        data_frame.camera_frame_rgb = np.zeros((VehicleCamera.HEIGHT, VehicleCamera.WIDTH, Sizes.Camera.RGB_PIXEL), dtype=np.uint8)        
+        data_frame.camera_frame_rgb[self._counter : self._counter + 10, :, 1] = 255
+        data_frame.camera_frame_depth = np.zeros((VehicleCamera.HEIGHT, VehicleCamera.WIDTH), dtype=np.float16)
+        data_frame.camera_frame_depth[self._counter : self._counter + 10] = 30
+
+        data_frame.motors_power = _sin
+        data_frame.speed = _sin
+        data_frame.steering_angle = 40 * _sin
+        data_frame.imu_data = IMUData(_sin, _cos, _sin, _cos, _sin, _cos)
+        data_frame.encoder_data = EncoderData(_sin, _cos)
+        data_frame.pose = Pose(Position(_cos, _sin, _cos), Rotation(_sin, _cos, _sin))
+        time.sleep(1/60)
+        data_frame.delta_time = generator_start - datetime.now().timestamp()
+
+        self._counter = (self._counter + 5) % Cam.HEIGHT
+        self._time += RenderLoopSettings.RENDER_DTIME
+
+        return data_frame.tobytes()
 
 
-def tcp_data_sender():
+def tcp_data_sender(client):
+    addr = NetworkSettings.Simulation.SERVER_ADDR if client == ClientTypes.SIMULATION else NetworkSettings.Vehicle.SERVER_ADDR
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect(SERVER_ADDR)
+        s.connect(addr)
         
         def send_data():
-            while True:
+            while not stop_threads:
                 data = DATA_QUEUE.get()
                 s.sendall(data)
 
         def recv_data():
-            while True:
-                data = s.recv(8)
+            while not stop_threads:
+                data = s.recv(8,)
                 print(struct.unpack('ff', data))
         
         # Create and start the sending thread
@@ -61,26 +116,43 @@ def tcp_data_sender():
 
 
 def game_thread():
-    data = DummyData()
-    while True:
+    data = SimulationDummyData()
+    while not stop_threads:
         DATA_QUEUE.put(data())
 
+def vehicle_thread():
+    data = VehicleDummyData()
+    while not stop_threads:
+        DATA_QUEUE.put(data())
 
-def data_thread():
+def data_thread(client):
     try:
-        tcp_data_sender()
+        tcp_data_sender(client)
     except Exception as e:
         print(f"[Data] Exception occured: {e}")
         os._exit(1)
 
+import argparse
+parser = argparse.ArgumentParser(description="Run the ToySim server.")
+parser.add_argument(
+    '-c', '--client', 
+    choices=['sim', 'veh'], 
+    required=True, 
+    help="Specify the client type: 'sim' or 'veh'."
+)
+args = parser.parse_args()
+client_map = {'sim': ClientTypes.SIMULATION, 'veh': ClientTypes.VEHICLE}
+client = client_map[args.client]
 
-data_t = threading.Thread(target=data_thread)
+data_t = threading.Thread(target=data_thread, args=[client])
 data_t.daemon = True
+
 
 try:
     data_t.start()
-    while True:
-        game_thread()
+    while not stop_threads:
+        # game_thread()
+        vehicle_thread()
 except KeyboardInterrupt:
     print("[Client] Interrupt request - exiting program")
 finally:

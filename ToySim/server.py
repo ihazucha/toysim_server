@@ -2,7 +2,7 @@ import socket
 from queue import Queue
 from threading import Event, Thread
 
-from ToySim.settings import NetworkSettings
+from ToySim.settings import ClientTypes, NetworkSettings
 
 
 class TcpServer:
@@ -11,16 +11,20 @@ class TcpServer:
         recv_queue: Queue,
         send_queue: Queue,
         connected_event: Event,
-        host: str = NetworkSettings.SERVER_HOST,
-        port: int = NetworkSettings.SERVER_PORT,
+        listen_addr:tuple=None,
+        client=ClientTypes.SIMULATION,
         verbose: bool = True,
     ):
         self._recv_queue = recv_queue
         self._send_queue = send_queue
         self._connected_event = connected_event
+        self._client = client
         self._verbose = verbose
         self._thread = Thread(target=self._await_connection, daemon=True)
-        self._sock = self._bind_listen((host, port))
+        
+        if listen_addr is None:
+            listen_addr = NetworkSettings.Simulation.SERVER_ADDR if client == ClientTypes.SIMULATION else NetworkSettings.Vehicle.SERVER_ADDR
+        self._sock = self._bind_listen(listen_addr)
 
     def start(self):
         self._thread.start()
@@ -45,6 +49,7 @@ class TcpServer:
                 socket,
                 self._recv_queue,
                 self._send_queue,
+                client=self._client,
                 verbose=self._verbose,
             )
             self._connected_event.set()
@@ -55,11 +60,17 @@ class TcpServer:
 
 
 class TcpConnection:
-    def __init__(self, socket, recv_queue, send_queue, verbose=True):
+    def __init__(self, socket, recv_queue, send_queue, client=ClientTypes.SIMULATION, verbose=True):
         self._socket = socket
         self._recv_queue = recv_queue
         self._send_queue = send_queue
+        self._client = client
         self._verbose = verbose
+
+        if self._client == ClientTypes.SIMULATION:
+            self._recv_size = NetworkSettings.Simulation.RECV_DATA_SIZE_BYTES
+        elif self._client == ClientTypes.VEHICLE:
+            self._recv_size = NetworkSettings.Vehicle.RECV_DATA_SIZE_BYTES
 
     def __del__(self):
         self._close()
@@ -90,7 +101,7 @@ class TcpConnection:
         return data
 
     def _recv_data(self):
-        return self._recv_all(NetworkSettings.RECV_DATA_SIZE_BYTES)
+        return self._recv_all(self._recv_size)
 
     def receive_loop(self):
         exit_event = Event()
@@ -112,7 +123,7 @@ class TcpConnection:
                 except OSError:
                     self._log("Recv failed - connection closed by client")
                     break
-                exit_event.set()
+            exit_event.set()
         
         # Create and start the receiving thread
         recv_thread = Thread(target=recv_data)

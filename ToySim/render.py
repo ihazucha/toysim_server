@@ -277,20 +277,20 @@ class RendererApp(QWidget):
 
 
 class Renderer:
-    def __init__(self, data_queue: Queue):
+    def __init__(self, data_queue: Queue, client):
         self._data_queue = data_queue
         self._app = QApplication(sys.argv)
-        self._network_thread = RendererDataThread(data_queue)
+        self._data_thread = RendererDataThread(data_queue)
         self._app.aboutToQuit.connect(self._stop_thread_and_wait)
 
     def run(self):
         ex = RendererApp()
-        self._network_thread.finished.connect(self._app.exit)
-        self._network_thread.data_ready.connect(ex.update_image)
-        self._network_thread.start()
+        self._data_thread.finished.connect(self._app.exit)
+        self._data_thread.data_ready.connect(ex.update_image)
+        self._data_thread.start()
         ex.show()
         return self._app.exec()
 
     def _stop_thread_and_wait(self):
-        self._network_thread.stop()
-        self._network_thread.wait()
+        self._data_thread.stop()
+        self._data_thread.wait()
