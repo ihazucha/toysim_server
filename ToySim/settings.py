@@ -1,6 +1,7 @@
 import struct
+from enum import Enum
 
-class ClientTypes:
+class ClientTypes(Enum):
     SIMULATION = 0
     VEHICLE = 1
 
@@ -66,7 +67,7 @@ class VehicleDataSizes:
         DELTA_TIME = TypeSizesBytes.FLOAT
         IMU_DATA = 6 * TypeSizesBytes.FLOAT
         ENCODER_DATA = 2 * TypeSizesBytes.FLOAT
-        POSE = 6 * TypeSizesBytes.FLOAT
+        POSE = 6 * TypeSizesBytes.DOUBLE
         # ---
         TOTAL = MOTORS_POWER + SPEED + STEERING_ANGLE + DELTA_TIME + IMU_DATA + ENCODER_DATA + POSE
 
@@ -91,10 +92,10 @@ class NetworkSettings:
         RECV_DATA_SIZE_BYTES = SimulationDataSizesBytes.TOTAL
         SEND_DATA_SIZE_BYTES = SimulationDataSizesBytes.Vehicle.TOTAL
     class Vehicle:
-        SERVER_HOST = "localhost"
+        SERVER_HOST = "192.168.0.104"
         SERVER_PORT = 3333
         SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
-        RECV_DATA_SIZE_BYTES = VehicleDataSizes.TOTAL
+        RECV_DATA_SIZE_BYTES = VehicleDataSizes.Vehicle.TOTAL
         SEND_DATA_SIZE_BYTES = SimulationDataSizesBytes.Vehicle.TOTAL
 
 class ControlLoopSettings:

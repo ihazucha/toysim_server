@@ -77,18 +77,18 @@ class VehicleDummyData:
         data_frame.steering_angle = 40 * _sin
         data_frame.imu_data = IMUData(_sin, _cos, _sin, _cos, _sin, _cos)
         data_frame.encoder_data = EncoderData(_sin, _cos)
-        data_frame.pose = Pose(Position(_cos, _sin, _cos), Rotation(_sin, _cos, _sin))
+        data_frame.pose = Pose(Position(_cos*1000, _sin*1000, _cos*1000), Rotation(_sin, _sin, _sin))
         time.sleep(1/60)
         data_frame.delta_time = generator_start - datetime.now().timestamp()
 
-        self._counter = (self._counter + 5) % Cam.HEIGHT
+        self._counter = (self._counter + 5) % VehicleCamera.HEIGHT
         self._time += RenderLoopSettings.RENDER_DTIME
 
         return data_frame.tobytes()
 
 
 def tcp_data_sender(client):
-    addr = NetworkSettings.Simulation.SERVER_ADDR if client == ClientTypes.SIMULATION else NetworkSettings.Vehicle.SERVER_ADDR
+    addr = ("192.168.0.104", 3333) if client == ClientTypes.SIMULATION else NetworkSettings.Vehicle.SERVER_ADDR
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect(addr)
         
@@ -115,7 +115,7 @@ def tcp_data_sender(client):
         recv_thread.join()
 
 
-def game_thread():
+def simulation_thread():
     data = SimulationDummyData()
     while not stop_threads:
         DATA_QUEUE.put(data())
@@ -150,8 +150,9 @@ data_t.daemon = True
 
 try:
     data_t.start()
-    while not stop_threads:
-        # game_thread()
+    if client == ClientTypes.SIMULATION:
+        simulation_thread()
+    else:
         vehicle_thread()
 except KeyboardInterrupt:
     print("[Client] Interrupt request - exiting program")

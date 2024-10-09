@@ -1,5 +1,5 @@
 import socket
-from queue import Queue
+from queue import Queue, Empty
 from threading import Event, Thread
 
 from ToySim.settings import ClientTypes, NetworkSettings
@@ -108,11 +108,13 @@ class TcpConnection:
         def send_data():
             while not exit_event.is_set():
                 try:
-                    data = self._send_queue.get()
+                    data = self._send_queue.get(timeout=1)
                     self._socket.sendall(data)
                 except OSError:
                     self._log("Send failed - connection closed by client")
                     break
+                except Empty:
+                    pass
                     
 
         def recv_data():
@@ -122,8 +124,8 @@ class TcpConnection:
                     self._recv_queue.put(data)
                 except OSError:
                     self._log("Recv failed - connection closed by client")
+                    exit_event.set()
                     break
-            exit_event.set()
         
         # Create and start the receiving thread
         recv_thread = Thread(target=recv_data)
@@ -133,5 +135,6 @@ class TcpConnection:
         send_thread = Thread(target=send_data)
         send_thread.start()
         
-        send_thread.join()
         recv_thread.join()
+        send_thread.join()
+        

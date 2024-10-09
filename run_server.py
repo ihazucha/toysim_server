@@ -25,14 +25,14 @@ if __name__ == "__main__":
     client = client_map[args.client]
 
     recv_queue = Queue(maxsize=2)
-    send_queue = Queue(maxsize=2)
+    send_queue = Queue(maxsize=1)
     render_queue = Queue(maxsize=2)
     connected_event = Event()
 
     server = TcpServer(recv_queue, send_queue, connected_event, client=client)
     server.start()
 
-    processor = Processor(recv_queue, send_queue, render_queue, connected_event)
+    processor = Processor(recv_queue, send_queue, render_queue, connected_event, client=client)
     processor.start()
 
     renderer = Renderer(render_queue, client=client)

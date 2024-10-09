@@ -15,7 +15,7 @@ def decode_stream(sock):
     for frame in container.decode(video=0):
         # Convert frame to numpy array
         img = frame.to_ndarray(format='bgr24')
-        print(f'{img.shape}')
+        # print(f'{img.shape}')
         
         # Display the frame using OpenCV
         cv2.imshow("H.264 Video Playback", img)
