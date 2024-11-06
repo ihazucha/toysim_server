@@ -1,23 +1,21 @@
 import socket
-from queue import Queue, Empty
+from queue import Full, Queue, Empty
 from threading import Event, Thread
+import cv2
+import numpy as np
 
-from ToySim.settings import ClientTypes, NetworkSettings
+RECV_SIZE = 720*1280*3
 
 class TcpServer:
     def __init__(
         self,
         recv_queue: Queue,
         send_queue: Queue,
-        connected_event: Event,
         address: tuple,
-        client: ClientTypes,
         verbose: bool = True,
     ):
         self._recv_queue = recv_queue
         self._send_queue = send_queue
-        self._connected_event = connected_event
-        self._client = client
         self._verbose = verbose
         self._thread = Thread(target=self._await_connection, daemon=True)
         self._sock = self._bind_listen(address)
@@ -45,28 +43,19 @@ class TcpServer:
                 socket,
                 self._recv_queue,
                 self._send_queue,
-                client=self._client,
                 verbose=self._verbose,
             )
-            self._connected_event.set()
             connection.receive_loop()
             del connection
             self._log(f"Disconnected: {addr}")
-            self._connected_event.clear()
 
 
 class TcpConnection:
-    def __init__(self, socket, recv_queue, send_queue, client=ClientTypes.SIMULATION, verbose=True):
+    def __init__(self, socket, recv_queue, send_queue, verbose=True):
         self._socket = socket
         self._recv_queue = recv_queue
         self._send_queue = send_queue
-        self._client = client
         self._verbose = verbose
-
-        if self._client == ClientTypes.SIMULATION:
-            self._recv_size = NetworkSettings.Simulation.RECV_DATA_SIZE_BYTES
-        elif self._client == ClientTypes.VEHICLE:
-            self._recv_size = NetworkSettings.Vehicle.RECV_DATA_SIZE_BYTES
 
     def __del__(self):
         self._close()
@@ -112,12 +101,15 @@ class TcpConnection:
         def recv(exit_event:Event):
             while True:
                 try:
-                    data = self._recv_data(self._recv_size)
+                    data = self._recv_data(RECV_SIZE)
                     self._recv_queue.put(data)
                 except OSError:
                     self._log("Recv failed - connection closed by client")
                     exit_event.set()
                     break
+                except Full:
+                    pass
+                    self._log("Recv queue full, data loss!")
         
         exit_event = Event()
         recv_thread = Thread(target=recv, args=[exit_event])
@@ -129,3 +121,35 @@ class TcpConnection:
         recv_thread.join()
         send_thread.join()
         
+
+if __name__ == '__main__':
+    recv_queue = Queue(1)
+    send_queue = Queue(1)
+    addr = ('localhost', 8888)
+    server = TcpServer(recv_queue, send_queue, addr)
+    server.start()
+
+    def decode_frame(data):
+        nparr = np.frombuffer(data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        return frame
+
+    width, height = 1280, 720
+    cv2.namedWindow("Video", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Video", width, height)
+
+    try:
+        while True:
+            data = recv_queue.get()
+            frame = decode_frame(data)
+            if frame is not None:
+                cv2.imshow("Video", frame)
+            else:
+                print("Frame is none")
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    except KeyboardInterrupt:
+        print("Terminating program...")
+    finally:
+        cv2.destroyAllWindows()
