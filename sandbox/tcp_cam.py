@@ -8,37 +8,77 @@ from multiprocessing import Process, Queue
 
 MAX_DGRAM = 2**16
 
+def get_local_ip():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+
 parser = argparse.ArgumentParser(description="")
-parser.add_argument("-a", "--addr", type=str, default="localhost", help="Bind port")
-parser.add_argument("-p", "--port", type=int, default="5555", help="Bind address")
+parser.add_argument("-a", "--addr", type=str, default=get_local_ip(), help="Bind port")
+parser.add_argument("-cp", "--cameraport", type=int, default="5555", help="Bind address")
+parser.add_argument("-sp", "--sensorport", type=int, default="6666", help="Bind address")
 args = parser.parse_args()
 
-class UDPImageServer:
-    MAX_DGRAM_SIZE = 2**16
+MAX_DGRAM_SIZE = 2**16
 
+
+class UDPImageReceiver:
     def __init__(self, addr: str, port: int):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind((addr, port))
 
-    def recv_image(self) -> tuple[bytes, int]:
+    def recv(self) -> tuple[bytes, int]:
         image = b""
         segment = 255
         while segment != 1:
-            dgram = self._sock.recv(self.__class__.MAX_DGRAM_SIZE)
+            dgram = self._sock.recv(MAX_DGRAM_SIZE)
             segment, timestamp = struct.unpack("=BQ", dgram[0:9])
             image += dgram[9:]
         return (image, timestamp)
 
-def udp_server(queue: Queue, addr: str, port: int):
-    udp = UDPImageServer(addr=addr, port=port)
-    while True:
-        jpg_data, timestamp = udp.recv_image()
-        queue.put((jpg_data, timestamp))
+    def close(self):
+        self._sock.close()
 
-def visualizer(queue: Queue):
+
+class UDPSensorReceiver:
+    def __init__(self, addr: str, port: int):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind((addr, port))
+
+    def recv(self) -> bytes:
+        data = self._sock.recv(MAX_DGRAM_SIZE)
+        return data
+
+    def close(self):
+        self._sock.close()
+
+
+def camera_server(queue: Queue, addr: str, port: int):
+    udp = UDPImageReceiver(addr=addr, port=port)
+    try:
+        while True:
+            jpg_data, timestamp = udp.recv()
+            queue.put((jpg_data, timestamp))
+    finally:
+        udp.close()
+
+
+def sensor_server(queue: Queue, addr: str, port: int):
+    udp = UDPSensorReceiver(addr=addr, port=port)
+    try:
+        while True:
+            data = udp.recv()
+            queue.put(data)
+    finally:
+        udp.close()
+
+
+def visualizer(camera_queue: Queue, sensor_queue: Queue) -> None:
     prev_timestamp = 0
     while True:
-        jpg_data, timestamp = queue.get()
+        jpg_data, timestamp = camera_queue.get()
+        data = sensor_queue.get()
+        print(data)
         try:
             image = cv2.imdecode(np.frombuffer(jpg_data, np.uint8), cv2.IMREAD_COLOR)
         except Exception as e:
@@ -61,20 +101,29 @@ def visualizer(queue: Queue):
             break
     cv2.destroyAllWindows()
 
+
 if __name__ == "__main__":
-    frame_queue:Queue = Queue(maxsize=1)
-    p_udp = Process(target=udp_server, args=(frame_queue, args.addr, args.port))
-    p_viz = Process(target=visualizer, args=(frame_queue,))
-    
-    p_udp.start()
-    p_viz.start()
-    
+    camera_queue: Queue = Queue(maxsize=1)
+    sensor_queue: Queue = Queue(maxsize=1)
+    p_camera = Process(target=camera_server, args=(camera_queue, args.addr, args.cameraport))
+    p_sensor = Process(target=sensor_server, args=(sensor_queue, args.addr, args.sensorport))
+    p_visualiser = Process(target=visualizer, args=(camera_queue, sensor_queue))
+
+    p_camera.start()
+    p_visualiser.start()
+    p_sensor.start()
+
     try:
-        p_udp.join()
-        p_viz.join()
+        p_camera.join()
+        p_visualiser.join()
+        p_sensor.join()
     except (KeyboardInterrupt, SystemExit):
-        p_udp.terminate()
-        p_viz.terminate()
-        p_udp.join()
-        p_viz.join()
+        print("[Server] Interrupted, exiting...")
+    finally:
+        p_camera.terminate()
+        p_visualiser.terminate()
+        p_sensor.terminate()
+        p_camera.join()
+        p_visualiser.join()
+        p_sensor.join()
         sys.exit()
