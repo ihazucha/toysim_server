@@ -1,3 +1,4 @@
+import math
 import sys
 import cv2
 import numpy as np
@@ -5,6 +6,7 @@ import argparse
 import socket
 import struct
 from multiprocessing import Process, Queue
+import time
 
 MAX_DGRAM = 2**16
 
@@ -52,6 +54,16 @@ class UDPSensorReceiver:
     def close(self):
         self._sock.close()
 
+class UDPControlSender:
+    def __init__(self, addr: str, port: int):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.connect((addr, port))
+
+    def send(self, data: bytes):
+        self._sock.send(data)
+
+    def close(self):
+        self._sock.close()
 
 def camera_server(queue: Queue, addr: str, port: int):
     udp = UDPImageReceiver(addr=addr, port=port)
@@ -72,13 +84,25 @@ def sensor_server(queue: Queue, addr: str, port: int):
     finally:
         udp.close()
 
+def control_client(addr: str, port: int):
+    udp = UDPControlSender(addr=addr, port=port)
+    t = 0.0
+    try:
+        while True:
+            x = math.sin(t)
+            t += 0.05 
+            set_steering_angle, set_speed = x, x
+            timestamp = time.time()
+            data = struct.pack("3d", timestamp, set_steering_angle, set_speed)
+            udp.send(data)
+    finally:
+        udp.close()
 
 def visualizer(camera_queue: Queue, sensor_queue: Queue) -> None:
     prev_timestamp = 0
     while True:
         jpg_data, timestamp = camera_queue.get()
         data = sensor_queue.get()
-        print(data)
         try:
             image = cv2.imdecode(np.frombuffer(jpg_data, np.uint8), cv2.IMREAD_COLOR)
         except Exception as e:
