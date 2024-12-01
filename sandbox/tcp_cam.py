@@ -6,148 +6,194 @@ import argparse
 import socket
 import struct
 from multiprocessing import Process, Queue
+from threading import Thread
 import time
 
-MAX_DGRAM = 2**16
+MAX_DGRAM_SIZE = 2**16
+
 
 def get_local_ip():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
 
-parser = argparse.ArgumentParser(description="")
-parser.add_argument("-a", "--addr", type=str, default=get_local_ip(), help="Bind port")
-parser.add_argument("-cp", "--cameraport", type=int, default="5555", help="Bind address")
-parser.add_argument("-sp", "--sensorport", type=int, default="6666", help="Bind address")
-args = parser.parse_args()
 
-MAX_DGRAM_SIZE = 2**16
-
-
-class UDPImageReceiver:
-    def __init__(self, addr: str, port: int):
+class UDPImageReceiver(Thread):
+    def __init__(self, queue: Queue, addr: str = get_local_ip(), port: int = 5500):
+        super().__init__()
+        self._queue = queue
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((addr, port))
 
-    def recv(self) -> tuple[bytes, int]:
+    def _recv(self) -> tuple[bytes, int]:
         image = b""
         segment = 255
         while segment != 1:
-            dgram = self._sock.recv(MAX_DGRAM_SIZE)
+            dgram, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
             segment, timestamp = struct.unpack("=BQ", dgram[0:9])
             image += dgram[9:]
         return (image, timestamp)
 
-    def close(self):
+    def stop(self):
         self._sock.close()
 
+    def run(self):
+        try:
+            self._run()
+        finally:
+            self.close()
 
-class UDPSensorReceiver:
-    def __init__(self, addr: str, port: int):
+    def _run(self):
+        while True:
+            jpg_data, timestamp = self._recv()
+            self._queue.put((jpg_data, timestamp))
+
+
+class UDPSensorReceiver(Thread):
+    def __init__(self, queue: Queue, addr: str = get_local_ip(), port: int = 5510):
+        super().__init__()
+        self._queue = queue
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((addr, port))
 
-    def recv(self) -> bytes:
-        data = self._sock.recv(MAX_DGRAM_SIZE)
-        return data
-
-    def close(self):
+    def stop(self):
         self._sock.close()
 
-class UDPControlSender:
-    def __init__(self, addr: str, port: int):
+    def run(self):
+        try:
+            self._run()
+        finally:
+            self.stop()
+
+    def _run(self):
+        while True:
+            data, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
+            self._queue.put(data)
+
+
+class UDPControlSender(Thread):
+    def __init__(self, queue: Queue, addr: str, port: int = 5520):
+        super().__init__()
+        self._queue = queue
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.connect((addr, port))
 
-    def send(self, data: bytes):
-        self._sock.send(data)
-
-    def close(self):
+    def stop(self):
         self._sock.close()
 
-def camera_server(queue: Queue, addr: str, port: int):
-    udp = UDPImageReceiver(addr=addr, port=port)
-    try:
+    def run(self):
+        try:
+            self._run()
+        finally:
+            self.stop()
+
+    def _run(self):
         while True:
-            jpg_data, timestamp = udp.recv()
-            queue.put((jpg_data, timestamp))
-    finally:
-        udp.close()
+            data = self._queue.get()
+            self._sock.send(data)
 
 
-def sensor_server(queue: Queue, addr: str, port: int):
-    udp = UDPSensorReceiver(addr=addr, port=port)
-    try:
-        while True:
-            data = udp.recv()
-            queue.put(data)
-    finally:
-        udp.close()
+class Generator(Process):
+    def __init__(self, queue: Queue):
+        super().__init__()
+        self._queue = queue
 
-def control_client(addr: str, port: int):
-    udp = UDPControlSender(addr=addr, port=port)
-    t = 0.0
-    try:
+    def run(self):
+        t = 0.0
         while True:
             x = math.sin(t)
-            t += 0.05 
+            t += 0.05
             set_steering_angle, set_speed = x, x
             timestamp = time.time()
             data = struct.pack("3d", timestamp, set_steering_angle, set_speed)
-            udp.send(data)
-    finally:
-        udp.close()
+            self._queue.put(data)
+            time.sleep(0.05)
 
-def visualizer(camera_queue: Queue, sensor_queue: Queue) -> None:
-    prev_timestamp = 0
-    while True:
-        jpg_data, timestamp = camera_queue.get()
-        data = sensor_queue.get()
+
+class Visualizer(Process):
+    def __init__(self, q_image: Queue, q_sensor: Queue) -> None:
+        super().__init__()
+        self._q_image = q_image
+        self._q_sensor = q_sensor
+
+    def close(self):
+        cv2.destroyAllWindows()
+
+    def run(self):
         try:
-            image = cv2.imdecode(np.frombuffer(jpg_data, np.uint8), cv2.IMREAD_COLOR)
-        except Exception as e:
-            print(f"[Server] JPG decode problem: {e}")
-            continue
-        text = f"dt: {timestamp - prev_timestamp} [ms]"
-        cv2.putText(
-            image,
-            text,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2,
-            cv2.LINE_AA,
-        )
-        prev_timestamp = timestamp
-        cv2.imshow("UDPCam", image)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    cv2.destroyAllWindows()
+            self._run()
+        finally:
+            self.close
+
+    def _run(self):
+        prev_timestamp = 0
+        while True:
+            jpg_data, timestamp = self._q_image.get()
+            data = self._q_sensor.get()
+            try:
+                image = cv2.imdecode(np.frombuffer(jpg_data, np.uint8), cv2.IMREAD_COLOR)
+            except Exception as e:
+                print(f"[Server] JPG decode problem: {e}")
+                continue
+            text = f"dt: {timestamp - prev_timestamp} [ms]"
+            cv2.putText(
+                image,
+                text,
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+            prev_timestamp = timestamp
+            cv2.imshow("UDPCam", image)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+
+class Network(Process):
+    def __init__(self, q_image: Queue, q_sensor: Queue, q_control: Queue, addr: str):
+        super().__init__()
+        self._q_image = q_image
+        self._q_sensor = q_sensor
+        self._q_control = q_control
+        self._addr = addr
+
+    def run(self):
+        image_receiver = UDPImageReceiver(queue=self._q_image)
+        sensor_receiver = UDPSensorReceiver(queue=self._q_sensor)
+        control_sender = UDPControlSender(queue=self._q_control, addr=self._addr)
+        threads = [image_receiver, sensor_receiver, control_sender]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
 
 
 if __name__ == "__main__":
-    camera_queue: Queue = Queue(maxsize=1)
-    sensor_queue: Queue = Queue(maxsize=1)
-    p_camera = Process(target=camera_server, args=(camera_queue, args.addr, args.cameraport))
-    p_sensor = Process(target=sensor_server, args=(sensor_queue, args.addr, args.sensorport))
-    p_visualiser = Process(target=visualizer, args=(camera_queue, sensor_queue))
+    parser = argparse.ArgumentParser(description="")
+    # TODO: remove this and use the first receive address instead
+    parser.add_argument("-a", "--addr", type=str, default="192.168.0.103", help="Client address")
+    args = parser.parse_args()
 
-    p_camera.start()
-    p_visualiser.start()
-    p_sensor.start()
+    q_image: Queue = Queue(maxsize=1)
+    q_sensor: Queue = Queue(maxsize=1)
+    q_control: Queue = Queue(maxsize=1)
+
+    p_network = Network(q_image=q_image, q_sensor=q_sensor, q_control=q_control, addr=args.addr)
+    p_generator = Generator(queue=q_control)
+    p_visualizer = Visualizer(q_image, q_sensor)
+
+    proceses = [p_network, p_generator, p_visualizer]
+    [p.start() for p in proceses]  # type: ignore
 
     try:
-        p_camera.join()
-        p_visualiser.join()
-        p_sensor.join()
+        [p.join() for p in proceses]  # type: ignore
     except (KeyboardInterrupt, SystemExit):
         print("[Server] Interrupted, exiting...")
     finally:
-        p_camera.terminate()
-        p_visualiser.terminate()
-        p_sensor.terminate()
-        p_camera.join()
-        p_visualiser.join()
-        p_sensor.join()
+        [p.terminate() for p in proceses]  # type: ignore
+        [p.join() for p in proceses]  # type: ignore
         sys.exit()
