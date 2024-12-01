@@ -96,6 +96,25 @@ class UDPControlSender(Thread):
             self._sock.send(data)
 
 
+class Network(Process):
+    def __init__(self, q_image: Queue, q_sensor: Queue, q_control: Queue, addr: str):
+        super().__init__()
+        self._q_image = q_image
+        self._q_sensor = q_sensor
+        self._q_control = q_control
+        self._addr = addr
+
+    def run(self):
+        image_receiver = UDPImageReceiver(queue=self._q_image)
+        sensor_receiver = UDPSensorReceiver(queue=self._q_sensor)
+        control_sender = UDPControlSender(queue=self._q_control, addr=self._addr)
+        threads = [image_receiver, sensor_receiver, control_sender]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+
+
+
+
 class Generator(Process):
     def __init__(self, queue: Queue):
         super().__init__()
@@ -153,23 +172,6 @@ class Visualizer(Process):
             cv2.imshow("UDPCam", image)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
-
-
-class Network(Process):
-    def __init__(self, q_image: Queue, q_sensor: Queue, q_control: Queue, addr: str):
-        super().__init__()
-        self._q_image = q_image
-        self._q_sensor = q_sensor
-        self._q_control = q_control
-        self._addr = addr
-
-    def run(self):
-        image_receiver = UDPImageReceiver(queue=self._q_image)
-        sensor_receiver = UDPSensorReceiver(queue=self._q_sensor)
-        control_sender = UDPControlSender(queue=self._q_control, addr=self._addr)
-        threads = [image_receiver, sensor_receiver, control_sender]
-        [t.start() for t in threads]
-        [t.join() for t in threads]
 
 
 if __name__ == "__main__":
