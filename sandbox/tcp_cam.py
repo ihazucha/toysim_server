@@ -113,8 +113,6 @@ class Network(Process):
         [t.join() for t in threads]
 
 
-
-
 class Generator(Process):
     def __init__(self, queue: Queue):
         super().__init__()

@@ -5,7 +5,7 @@ from threading import Event, Thread
 from multiprocessing import Process, Queue
 from queue import Empty
 
-from ToySim.settings import ClientTypes, NetworkSettings
+from ToySim.utils import SharedBuffer
 
 
 def get_local_ip():
@@ -121,9 +121,9 @@ class TcpConnection:
 
 
 class UDPImageReceiver(Thread):
-    def __init__(self, queue: Queue, addr: str = get_local_ip(), port: int = 5500):
+    def __init__(self, buffer: SharedBuffer.Writer, addr: str = get_local_ip(), port: int = 5500):
         super().__init__()
-        self._queue = queue
+        self._buffer = buffer
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((addr, port))
@@ -149,13 +149,13 @@ class UDPImageReceiver(Thread):
     def _run(self):
         while True:
             jpg_data, timestamp = self._recv()
-            self._queue.put((jpg_data, timestamp))
+            self._buffer.write((jpg_data, timestamp))
 
 
 class UDPSensorReceiver(Thread):
-    def __init__(self, queue: Queue, addr: str = get_local_ip(), port: int = 5510):
+    def __init__(self, buffer: SharedBuffer.Writer, addr: str = get_local_ip(), port: int = 5510):
         super().__init__()
-        self._queue = queue
+        self._buffer = buffer
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((addr, port))
@@ -176,13 +176,13 @@ class UDPSensorReceiver(Thread):
     def _run(self):
         while True:
             data, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
-            self._queue.put(data)
+            self._buffer.write(data)
 
 
 class UDPControlSender(Thread):
-    def __init__(self, queue: Queue, addr: str, port: int = 5520):
+    def __init__(self, buffer: SharedBuffer.Reader, addr: str, port: int = 5520):
         super().__init__()
-        self._queue = queue
+        self._buffer = buffer
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.connect((addr, port))
@@ -198,7 +198,7 @@ class UDPControlSender(Thread):
 
     def _run(self):
         while True:
-            data = self._queue.get()
+            data = self._buffer.head()
             self._sock.send(data)
 
 
@@ -210,9 +210,11 @@ class Network(Process):
         self._q_control = q_control
 
     def run(self):
-        image_receiver = UDPImageReceiver(queue=self._q_image)
-        sensor_receiver = UDPSensorReceiver(queue=self._q_sensor)
-        control_sender = UDPControlSender(queue=self._q_control, addr=sensor_receiver.get_client_ip())
+        image_receiver = UDPImageReceiver(buffer=self._q_image)
+        sensor_receiver = UDPSensorReceiver(buffer=self._q_sensor)
+        control_sender = UDPControlSender(
+            buffer=self._q_control, addr=sensor_receiver.get_client_ip()
+        )
         threads = [image_receiver, sensor_receiver, control_sender]
         [t.start() for t in threads]
         [t.join() for t in threads]
