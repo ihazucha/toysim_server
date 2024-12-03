@@ -1,6 +1,7 @@
 from copy import deepcopy
 import sys
 import time
+from typing import Tuple
 import cv2
 import numpy as np
 from collections import deque
@@ -61,15 +62,20 @@ class VehicleRendererData(QThread):
 
     def run(self):
         while self._is_running:
-            image_data = self._q_image.head()
+            image_data = deepcopy(self._q_image.head())
 
             if image_data is None:
                 continue
 
             jpg_image, timestamp = image_data
             image = cv2.imdecode(np.frombuffer(jpg_image, np.uint8), cv2.IMREAD_COLOR)
-            qimage = QImage(image, 384, 308, QImage.Format_BGR888)
-
+            # cv2.imwrite("output.jpg", image)
+            # print(image.shape)
+            # image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            height, width, channel = image.shape
+            bytes_per_line = channel * width
+            qimage = QImage(image.data, width, height, bytes_per_line, QImage.Format_BGR888)
+            # qimage.save("qimage.jpg")
             self.image_data_ready.emit((qimage, timestamp))
 
     def stop(self):
