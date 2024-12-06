@@ -18,21 +18,22 @@ def main():
         q_sensor=q_sensor.get_writer(),
         q_control=q_control.get_reader(),
     )
-    network.start()
 
     processor = Processor(
         q_image=q_image.get_reader(),
         q_sensor=q_sensor.get_reader(),
         q_control=q_control.get_writer(),
     )
-    processor.start()
 
     renderer = Renderer(
         q_image=q_image.get_reader(),
         q_sensor=q_sensor.get_reader(),
         q_control=q_control.get_reader(),
     )
+
     exit_code = renderer.run()
+    network.start()
+    processor.start()
 
     sys.exit(exit_code)
 
