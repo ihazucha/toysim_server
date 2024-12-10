@@ -15,7 +15,7 @@ import pyqtgraph.opengl as gl  # type: ignore
 
 from .settings import ClientTypes, SimulationCameraSettings, VehicleCamera
 
-from ToySim.utils import SharedBuffer
+from ToySim.ipc import SharedBuffer
 
 
 FPS = 60

@@ -1,8 +1,8 @@
 from multiprocessing import Process
 from time import time, sleep
 
-from ToySim.utils import SharedBuffer
-from ToySim.data import VehicleControlData
+from ToySim.ipc import SharedBuffer
+from ToySim.data import RemoteControlData
 
 class Processor(Process):
     def __init__(
@@ -18,7 +18,7 @@ class Processor(Process):
 
     def run(self):
         while True:
-            control_data = VehicleControlData(time(), 0.0, 0.0)
+            control_data = RemoteControlData(time(), 0.0, 0.0)
             self._q_control.write(control_data.to_bytes())
             # TODO: artificial sleep to prevent UDP bombardment
             sleep(0.05)

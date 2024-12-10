@@ -1,5 +1,5 @@
 from pydualsense import pydualsense  # type: ignore
-from data import VehicleControlData  # type: ignore
+from data import RemoteControlData  # type: ignore
 from multiprocessing import Queue
 
 import time
@@ -37,7 +37,7 @@ class DualSense(Controller):
         force_diff = self._dualsense.state.L2 - self._dualsense.state.R2
         set_speed = DualSense.BTN_FORCE2POWER * force_diff
         set_steering_angle = DualSense.STICK_FORCE2POWER * self._dualsense.state.LX
-        return VehicleControlData(time.time(), set_speed, set_steering_angle)
+        return RemoteControlData(time.time(), set_speed, set_steering_angle)
 
     def is_connected(self):
         return self._connected

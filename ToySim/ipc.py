@@ -46,3 +46,4 @@ class SharedBuffer:
         @property
         def index(self):
             return self._index.value
+

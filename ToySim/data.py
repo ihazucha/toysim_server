@@ -186,7 +186,7 @@ class SensorData(SerializableComplex):
         return [self.imu, self.rleft_encoder, self.rright_encoder, self.pose]
 
 
-class VehicleControlData(SerializablePrimitive):
+class RemoteControlData(SerializablePrimitive):
     FORMAT = "=3d"
     SIZE = struct.calcsize(FORMAT)
 

@@ -1,11 +1,12 @@
 import socket
 import struct
+import os
 
 from threading import Event, Thread
 from multiprocessing import Process, Queue
 from queue import Empty
 
-from ToySim.utils import SharedBuffer
+from ToySim.ipc import SharedBuffer
 
 
 def get_local_ip():
@@ -13,6 +14,7 @@ def get_local_ip():
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
 
+DEBUG = os.getenv('DEBUG', 0)
 
 MAX_DGRAM_SIZE = 2**16
 
@@ -159,6 +161,9 @@ class UDPSensorReceiver(Thread):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((addr, port))
+        if DEBUG:
+            print(f"[{self.__class__.name}] Bind to: {addr}:{port}")
+
 
     def stop(self):
         self._sock.close()
