@@ -3,10 +3,10 @@ import struct
 import os
 
 from threading import Event, Thread
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 from queue import Empty
 
-from ToySim.ipc import SharedBuffer
+from ToySim.ipc import SPMCQueue
 
 
 def get_local_ip():
@@ -14,7 +14,8 @@ def get_local_ip():
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
 
-DEBUG = os.getenv('DEBUG', 0)
+
+DEBUG = os.getenv("DEBUG", 0)
 
 MAX_DGRAM_SIZE = 2**16
 
@@ -22,8 +23,8 @@ MAX_DGRAM_SIZE = 2**16
 class TcpServer(Process):
     def __init__(
         self,
-        q_recv: Queue,
-        q_send: Queue,
+        q_recv: SPMCQueue,
+        q_send: SPMCQueue,
         e_connected: Event,
     ):
         super().__init__()
@@ -56,7 +57,7 @@ class TcpServer(Process):
 
 
 class TcpConnection:
-    def __init__(self, socket, q_recv, q_send):
+    def __init__(self, socket, q_recv: SPMCQueue, q_send: SPMCQueue):
         self._socket = socket
         self._q_recv = q_recv
         self._q_send = q_send
@@ -90,9 +91,10 @@ class TcpConnection:
 
     def receive_loop(self):
         def send(exit_event: Event):
+            q = self._q_send.get_consumer
             while not exit_event.is_set():
                 try:
-                    data = self._q_send.get(timeout=1)
+                    data = q.get()
                     self._socket.sendall(data)
                 except OSError:
                     exit_event.set()
@@ -102,10 +104,11 @@ class TcpConnection:
                     pass
 
         def recv(exit_event: Event):
+            q = self._q_recv.get_producer()
             while True:
                 try:
                     data = self._recv_data(self._recv_size)
-                    self._q_recv.put(data)
+                    q.put(data)
                 except OSError:
                     self._log("Recv failed - connection closed by client")
                     exit_event.set()
@@ -123,12 +126,24 @@ class TcpConnection:
 
 
 class UDPImageReceiver(Thread):
-    def __init__(self, buffer: SharedBuffer.Writer, addr: str = get_local_ip(), port: int = 5500):
+    def __init__(self, queue: SPMCQueue, ip: str = get_local_ip(), port: int = 5500):
         super().__init__()
-        self._buffer = buffer
+        self._queue = queue
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind((addr, port))
+        self._sock.bind((ip, port))
+
+    def run(self):
+        try:
+            self._run()
+        finally:
+            self._sock.close()
+
+    def _run(self):
+        q = self._queue.get_producer()
+        while True:
+            jpg_data, timestamp = self._recv()
+            q.put((jpg_data, timestamp))
 
     def _recv(self) -> tuple[bytes, int]:
         image = b""
@@ -139,87 +154,59 @@ class UDPImageReceiver(Thread):
             image += dgram[9:]
         return (image, timestamp)
 
-    def stop(self):
-        self._sock.close()
-
-    def run(self):
-        try:
-            self._run()
-        finally:
-            self.close()
-
-    def _run(self):
-        while True:
-            jpg_data, timestamp = self._recv()
-            self._buffer.write((jpg_data, timestamp))
-
 
 class UDPSensorReceiver(Thread):
-    def __init__(self, buffer: SharedBuffer.Writer, addr: str = get_local_ip(), port: int = 5510):
+    def __init__(self, queue: SPMCQueue, ip: str = get_local_ip(), port: int = 5510):
         super().__init__()
-        self._buffer = buffer
+        self._queue = queue
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.bind((addr, port))
-        if DEBUG:
-            print(f"[{self.__class__.name}] Bind to: {addr}:{port}")
-
-
-    def stop(self):
-        self._sock.close()
+        self._sock.bind((ip, port))
 
     def run(self):
         try:
             self._run()
         finally:
-            self.stop()
+            self._sock.close()
 
     def get_client_ip(self):
         _, addr = self._sock.recvfrom(MAX_DGRAM_SIZE)
         return addr[0]
 
     def _run(self):
+        q = self._queue.get_producer()
         while True:
             data, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
-            self._buffer.write(data)
+            q.put(data)
 
 
 class UDPControlSender(Thread):
-    def __init__(self, buffer: SharedBuffer.Reader, addr: str, port: int = 5520):
+    def __init__(self, queue: SPMCQueue, ip: str, port: int = 5520):
         super().__init__()
-        self._buffer = buffer
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.connect((addr, port))
-
-    def stop(self):
-        self._sock.close()
+        self._queue = queue
+        self._addr = (ip, port)
 
     def run(self):
-        try:
-            self._run()
-        finally:
-            self.stop()
-
-    def _run(self):
-        while True:
-            data = self._buffer.head()
-            self._sock.send(data)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.connect(self._addr)
+            q = self._queue.get_consumer()
+            while True:
+                data = q.get()
+                s.send(data)
 
 
 class Network(Process):
-    def __init__(self, q_image: Queue, q_sensor: Queue, q_control: Queue):
+    def __init__(self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_control: SPMCQueue):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
         self._q_control = q_control
 
     def run(self):
-        image_receiver = UDPImageReceiver(buffer=self._q_image)
-        sensor_receiver = UDPSensorReceiver(buffer=self._q_sensor)
-        control_sender = UDPControlSender(
-            buffer=self._q_control, addr=sensor_receiver.get_client_ip()
-        )
-        threads = [image_receiver, sensor_receiver, control_sender]
+        t_image = UDPImageReceiver(queue=self._q_image)
+        t_sensor = UDPSensorReceiver(queue=self._q_sensor)
+        t_control = UDPControlSender(queue=self._q_control, ip=t_sensor.get_client_ip())
+        threads = [t_image, t_sensor, t_control]
         [t.start() for t in threads]
         [t.join() for t in threads]

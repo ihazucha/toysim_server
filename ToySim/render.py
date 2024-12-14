@@ -1,21 +1,18 @@
-from copy import deepcopy
 import sys
 import time
-from typing import Tuple
 import cv2
 import numpy as np
 from collections import deque
-from queue import Queue, Empty
 
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QImage, QPixmap, QColor, QPen, QBrush, QLinearGradient, QVector3D
+from PySide6.QtGui import QImage, QPixmap, QColor, QBrush, QLinearGradient, QVector3D
 from PySide6.QtWidgets import QApplication, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel, QWidget
 import pyqtgraph as pg  # type: ignore
 import pyqtgraph.opengl as gl  # type: ignore
 
 from .settings import ClientTypes, SimulationCameraSettings, VehicleCamera
 
-from ToySim.ipc import SharedBuffer
+from ToySim.ipc import SPMCQueue
 
 
 FPS = 60
@@ -44,67 +41,110 @@ ALPHA = 3
 # Brightness control (0-100)
 BETA = 10
 
+RAW2DEG = 360 / 4096
 
-class VehicleRendererData(QThread):
-    image_data_ready = Signal(tuple)
+
+class RendererUISetup(QThread):
+    ui_setup_data_ready = Signal(tuple)
 
     def __init__(
         self,
-        q_image: SharedBuffer.Reader,
-        q_sensor: SharedBuffer.Reader,
-        q_control: SharedBuffer.Reader,
+        q_image: SPMCQueue,
+        q_sensor: SPMCQueue,
+        q_control: SPMCQueue,
     ):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
         self._q_control = q_control
+
+    def run(self):
+        q_image = self._q_image.get_consumer()
+        # q_sensor = self._q_sensor.get_consumer()
+        # q_control = self._q_control.get_consumer()
+        image_jpg, _ = q_image.get()
+        image_array = cv2.imdecode(np.frombuffer(image_jpg, np.uint8), cv2.IMREAD_COLOR)
+        height, width, _ = image_array.shape
+        self.ui_setup_data_ready.emit((width, height))
+
+
+class RendererImageData(QThread):
+    image_data_ready = Signal(tuple)
+
+    def __init__(self, q_image: SPMCQueue):
+        super().__init__()
+        self._q_image = q_image
         self._is_running = True
 
     def run(self):
+        q_image = self._q_image.get_consumer()
         while self._is_running:
-            image_data = deepcopy(self._q_image.head())
+            jpg, timestamp = q_image.get()
+            self.image_data_ready.emit((self._jpg2qimage(jpg), timestamp))
 
-            if image_data is None:
-                continue
-
-            jpg_image, timestamp = image_data
-            image = cv2.imdecode(np.frombuffer(jpg_image, np.uint8), cv2.IMREAD_COLOR)
-            # cv2.imwrite("output.jpg", image)
-            # print(image.shape)
-            # image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            height, width, channel = image.shape
-            bytes_per_line = channel * width
-            qimage = QImage(image.data, width, height, bytes_per_line, QImage.Format_BGR888)
-            # qimage.save("qimage.jpg")
-            self.image_data_ready.emit((qimage, timestamp))
+    def _jpg2qimage(jpg):
+        image_array = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        height, width, channel = image_array.shape
+        bytes_per_line = channel * width
+        return QImage(image_array.data, width, height, bytes_per_line, QImage.Format_BGR888)
 
     def stop(self):
         self._is_running = False
 
 
-RAW2DEG = 360 / 4096
+class RendererSensorData(QThread):
+    sensor_data_ready = Signal(tuple)
+
+    def __init__(self, q_sensor: SPMCQueue):
+        super().__init__()
+        self._q_sensor = q_sensor
+        self._is_running = True
+
+    def run(self):
+        q_sensor = self._q_sensor.get_consumer()
+        while self._is_running:
+            data = q_sensor.get()
+            self.sensor_data_ready.emit(data)
+
+    def stop(self):
+        self._is_running = False
 
 
 class VehicleRendererApp(QWidget):
     def __init__(self):
         super().__init__()
-        # Window and App
-        # ---------------------------------------
-        self.setWindowTitle("ToySimView")
-        # self.setWindowFlags(Qt.FramelessWindowHint)
 
+    def init_window(self, data):
+        self._cam_width, self._cam_height = data
+
+        self._w_init_main_window()
+        self._w_init_camera_raw()
+        self._w_init_camera_depth()
+        self._w_init_speed_plot()
+        self._w_init_steering_plot()
+        self._w_init_map_plot()
+        self._w_init_imu_plot()
+        self._w_init_encoders_plot()
+        self._w_init_layout()
+
+        self.show()
+
+    def _w_init_main_window(self):
+        self.setWindowTitle("ToySim UI")
+        # self.setWindowFlags(Qt.FramelessWindowHint)
         self._drag_pos = None
 
-        # Plotting
-        # ---------------------------------------
+    def _w_init_camera_raw(self):
         self.rgb_label = QLabel(self)
-        self.rgb_label.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
+        self.rgb_label.setMinimumSize(self._cam_width, self._cam_height)
         self.rgb_pixmap = QPixmap()
 
+    def _w_init_camera_depth(self):
         self.depth_label = QLabel(self)
-        self.depth_label.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
+        # self.depth_label.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
         self.depth_pixmap = QPixmap()
 
+    def _w_init_speed_plot(self):
         self.speed_plot = pg.PlotWidget()
         self.speed_plot.setXRange(-DATA_QUEUE_SIZE, 0)
         self.speed_plot.setYRange(-200, 200)
@@ -134,6 +174,7 @@ class VehicleRendererApp(QWidget):
             name="Setpoint",
         )
 
+    def _w_init_steering_plot(self):
         self.steering_plot = pg.PlotWidget()
         # self.steering_plot.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
         self.steering_plot.setXRange(-40, 40)
@@ -165,6 +206,7 @@ class VehicleRendererApp(QWidget):
             name="Setpoint",
         )
 
+    def _w_init_map_plot(self):
         self.map_plot = pg.PlotWidget()
         self.map_plot.setXRange(-100, 100)  # Adjust the range as needed
         self.map_plot.setYRange(-100, 100)  # Adjust the range as needed
@@ -194,46 +236,9 @@ class VehicleRendererApp(QWidget):
         self.path.setBrush(QBrush(gradient))
         self.map_plot.addItem(self.path)
 
+    def _w_init_imu_plot(self):
         self.imu_plot = gl.GLViewWidget()  # Placeholder for the 3D plot
         self.imu_plot.setSizePolicy(self.map_plot.sizePolicy())
-        self.init_imu_plot()
-        self.left_encoder_plot = pg.PlotWidget()  # Placeholder for the first smaller plot
-        self.init_left_encoder_plot()
-        self.right_encoder_plot = pg.PlotWidget()  # Placeholder for the second smaller plot
-
-        # Create the main grid layout
-        main_grid_layout = QGridLayout()
-        main_grid_layout.addWidget(self.rgb_label)
-        main_grid_layout.addWidget(self.depth_label)
-
-        imu_layout = QHBoxLayout()
-        imu_layout.addWidget(self.imu_plot)
-        imu_layout.addWidget(self.map_plot)
-
-        encoders_layout = QHBoxLayout()
-        encoders_layout.addWidget(self.left_encoder_plot)
-        encoders_layout.addWidget(self.right_encoder_plot)
-
-        # Create a vertical layout for the left side
-        left_layout = QVBoxLayout()
-        left_layout.addLayout(imu_layout)
-        left_layout.addLayout(encoders_layout)
-
-        right_layout = QVBoxLayout()
-        right_layout.addWidget(self.speed_plot)
-        right_layout.addWidget(self.steering_plot)
-
-        # Create the main horizontal layout
-        main_layout = QHBoxLayout()
-        main_layout.addLayout(left_layout)
-        main_layout.addLayout(main_grid_layout)
-        main_layout.addLayout(right_layout)
-
-        self.setLayout(main_layout)
-
-        self.setStyleSheet("background-color: #2d2a2e;")
-
-    def init_imu_plot(self):
         self.imu_plot.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
         self.imu_plot.setBackgroundColor("k")
 
@@ -271,25 +276,51 @@ class VehicleRendererApp(QWidget):
         self.imu_plot.addItem(y_label)
         self.imu_plot.addItem(z_label)
 
-    def init_left_encoder_plot(self):
+    def _w_init_encoders_plot(self):
+        self.left_encoder_plot = pg.PlotWidget()
+        self.right_encoder_plot = pg.PlotWidget()
         self.left_encoder_plot.setAspectLocked()
         self.left_encoder_plot.setXRange(-500, 500)
         self.left_encoder_plot.setYRange(-500, 500)
         self.left_encoder_plot.getPlotItem().showGrid(x=True, y=True)
         self.left_encoder_plot.getPlotItem().setTitle("Left Encoder Data")
-
-        # Create a deque to store the encoder data
         self.left_encoder_data = deque(maxlen=150)
-
-        # Create a scatter plot item for the data points
         self.left_encoder_scatter = pg.ScatterPlotItem(
             size=5, pen=pg.mkPen(None), brush=pg.mkBrush(255, 255, 255, 120)
         )
         self.left_encoder_plot.addItem(self.left_encoder_scatter)
-
-        # Create a plot curve item to connect the dots
         self.left_encoder_curve = pg.PlotCurveItem(pen=pg.mkPen("w", width=1))
         self.left_encoder_plot.addItem(self.left_encoder_curve)
+
+    def _w_init_layout(self):
+        imu_layout = QHBoxLayout()
+        imu_layout.addWidget(self.imu_plot)
+        imu_layout.addWidget(self.map_plot)
+
+        encoders_layout = QHBoxLayout()
+        encoders_layout.addWidget(self.left_encoder_plot)
+        encoders_layout.addWidget(self.right_encoder_plot)
+
+        left_layout = QVBoxLayout()
+        left_layout.addLayout(imu_layout)
+        left_layout.addLayout(encoders_layout)
+
+        middle_layout = QGridLayout()
+        middle_layout.addWidget(self.rgb_label)
+        middle_layout.addWidget(self.depth_label)
+
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.speed_plot)
+        right_layout.addWidget(self.steering_plot)
+
+        # Create the main horizontal layout
+        main_layout = QHBoxLayout()
+        main_layout.addLayout(left_layout)
+        main_layout.addLayout(middle_layout)
+        main_layout.addLayout(right_layout)
+
+        self.setLayout(main_layout)
+        self.setStyleSheet("background-color: #2d2a2e;")
 
     def update_orientation_lines(self, x, y, yaw):
         length = 20  # Length of the orientation lines
@@ -302,13 +333,16 @@ class VehicleRendererApp(QWidget):
         # Line 2: Perpendicular to Line 1
         self.orientation_line2.setData([x, x - dy], [y, y + dx])
 
-    def update_image(self, data):
+    def update_image_data(self, data):
         qimage, timestamp = data
         self.rgb_pixmap.convertFromImage(qimage)
         self.rgb_label.setPixmap(self.rgb_pixmap)
         # Depth
         # self.depth_pixmap.convertFromImage(qimage_depth)
         # self.depth_label.setPixmap(self.depth_pixmap)
+
+    def update_sensor_data(self, data):
+        ...
         # Plot speed
         # speed_cm = vehicle_data.speed / 10
         # self.speed_data.append(speed_cm)
@@ -338,6 +372,7 @@ class VehicleRendererApp(QWidget):
         #     vehicle_data.pose.position.y,
         #     vehicle_data.pose.rotation.yaw,
         # )
+
 
     def update_imu_plot(self, rotation):
         roll, pitch, yaw = (
@@ -400,322 +435,42 @@ class VehicleRendererApp(QWidget):
         )
 
 
-class RendererDataThread(QThread):
-    data_ready = Signal(tuple)
-
-    def __init__(self, data_queue: Queue, client, fps=FPS):
-        super().__init__()
-        self._data_queue = data_queue
-        self._client = client
-        self._is_running = True
-        self._fps = fps
-        self._dtime = 0 if fps == 0 else 1 / fps
-
-    def run(self):
-        if self._client == ClientTypes.SIMULATION:
-            self._run_simulation()
-        else:
-            self._run_vehicle()
-
-    def _run_simulation(self):
-        CLIP = 7500
-        while self._is_running:
-            try:
-                render_queue_data = self._data_queue.get(timeout=1)
-                simulation_data: SimulationDataFrame = render_queue_data[0]
-                control_data: ControlDataFrame = render_queue_data[1]
-            except Empty:
-                continue
-
-            # image_rgb = cv2.convertScaleAbs(image_rgb, alpha=ALPHA, beta=BETA)
-            qimage_rgb = QImage(
-                simulation_data.camera_frame_rgb,
-                SimulationCameraSettings.WIDTH,
-                SimulationCameraSettings.HEIGHT,
-                QImage.Format_RGB888,
-            )
-
-            # byte1 = image_rgba[:, :, 3].astype(np.uint16)
-            # byte2 = image_rgba[:, :, 4].astype(np.uint16)
-            # combined = (byte2 << 8) | byte1
-            # float_data = combined.view(np.float16)
-            clipped_float_data = np.clip(simulation_data.camera_frame_depth, 0, CLIP)
-            normalized_data = clipped_float_data / CLIP
-            int8_data = (normalized_data * 255).astype(np.uint8)
-            depth_map = cv2.applyColorMap(int8_data, cv2.COLORMAP_JET)
-            qimage_depth = QImage(
-                depth_map.data,
-                SimulationCameraSettings.WIDTH,
-                SimulationCameraSettings.HEIGHT,
-                QImage.Format.Format_RGB888,
-            )
-
-            # Emit
-            self.data_ready.emit(
-                (
-                    simulation_data.speed,
-                    control_data.speed_setpoint,
-                    simulation_data.steering_angle,
-                    control_data.steering_angle_setpoint,
-                    simulation_data.pose.position.x,
-                    simulation_data.pose.position.y,
-                    simulation_data.pose.rotation.yaw,
-                    qimage_rgb,
-                    qimage_depth,
-                )
-            )
-
-            # time.sleep(self._dtime)
-
-    def _run_vehicle(self):
-        CLIP = 7500
-        while self._is_running:
-            try:
-                render_queue_data = self._data_queue.get(timeout=1)
-                vehicle_data: VehicleDataFrame = render_queue_data[0]
-                control_data: ControlDataFrame = render_queue_data[1]
-            except Empty:
-                continue
-
-            qimage_rgb = QImage(
-                vehicle_data.camera_frame_rgb,
-                VehicleCamera.WIDTH,
-                VehicleCamera.HEIGHT,
-                QImage.Format_RGB888,
-            )
-            clipped_float_data = np.clip(vehicle_data.camera_frame_depth, 0, CLIP)
-            normalized_data = clipped_float_data / CLIP
-            int8_data = (normalized_data * 255).astype(np.uint8)
-            depth_map = cv2.applyColorMap(int8_data, cv2.COLORMAP_JET)
-            qimage_depth = QImage(
-                depth_map.data,
-                VehicleCamera.WIDTH,
-                VehicleCamera.HEIGHT,
-                QImage.Format.Format_RGB888,
-            )
-
-            # Emit
-            self.data_ready.emit(
-                (
-                    vehicle_data,
-                    control_data,
-                    qimage_rgb,
-                    qimage_depth,
-                )
-            )
-
-    def stop(self):
-        self._is_running = False
-
-
-class SimulationRendererApp(QWidget):
-    def __init__(self):
-        super().__init__()
-        # Window and App
-        # ---------------------------------------
-        self.setWindowTitle("RoboSim Data View")
-        # self.setWindowFlags(Qt.FramelessWindowHint)
-
-        self._drag_pos = None
-
-        # Plotting
-        # ---------------------------------------
-        self.rgb_label = QLabel(self)
-        # self.rgb_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
-        self.rgb_pixmap = QPixmap()
-
-        self.depth_label = QLabel(self)
-        # self.depth_label.setMinimumSize(SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT)
-        self.depth_pixmap = QPixmap()
-
-        self.speed_plot = pg.PlotWidget()
-        self.speed_plot.setMinimumSize(
-            SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT
-        )
-        self.speed_plot.setXRange(-DATA_QUEUE_SIZE, 0)
-        # self.speed_plot.setYRange(-1, 1)
-        self.speed_plot.getAxis("bottom").setTicks(STEP_TICKS)
-        self.speed_plot.getPlotItem().showGrid(x=True, y=True)
-        self.speed_plot.getPlotItem().setTitle("Speed")
-        self.speed_plot.getPlotItem().setLabel("left", "Speed [cm/s]")
-        self.speed_plot.getPlotItem().setLabel("bottom", f"Step [n] (s = {FPS} steps)")
-        self.speed_marker = pg.ScatterPlotItem(size=5, pen=pg.mkPen(None), brush="w")
-        self.speed_marker.setZValue(1)
-        self.speed_plot.addItem(self.speed_marker)
-
-        self.speed_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        self.speed_setpoint_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-
-        self.speed_plot.getPlotItem().addLegend()
-        self.speed_plot_data = self.speed_plot.plot(
-            PLOT_TIME_STEPS,
-            self.speed_data,
-            pen=pg.mkPen(QColor(0, 255, 0, 255), style=Qt.SolidLine),
-            name="Value",
-        )
-        self.speed_setpoint_plot_data = self.speed_plot.plot(
-            PLOT_TIME_STEPS,
-            self.speed_setpoint_data,
-            pen=pg.mkPen(QColor(0, 255, 0, 64), style=Qt.DashLine),
-            name="Setpoint",
-        )
-
-        self.steering_plot = pg.PlotWidget()
-        self.steering_plot.setMinimumSize(
-            SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT
-        )
-        self.steering_plot.setXRange(-40, 40)
-        self.steering_plot.getAxis("left").setTicks(STEP_TICKS)
-        self.steering_plot.getPlotItem().showGrid(x=True, y=True)
-        self.steering_plot.getPlotItem().setTitle("Steering Angle")
-        self.steering_plot.getPlotItem().setLabel("left", f"Step [n] (s = {FPS} steps)")
-        self.steering_plot.getPlotItem().setLabel("bottom", "Steering angle [deg]")
-        self.steering_marker = pg.ScatterPlotItem(
-            size=5, pen=pg.mkPen(None), brush="w", name="Current"
-        )
-        self.steering_marker.setZValue(1)
-        self.steering_plot.addItem(self.steering_marker)
-
-        self.steering_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        self.steering_setpoint_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-
-        self.steering_plot.getPlotItem().addLegend()
-        self.steering_plot_data = self.steering_plot.plot(
-            self.steering_data,
-            PLOT_TIME_STEPS,
-            pen=pg.mkPen(QColor(255, 0, 0, 255), style=Qt.SolidLine),
-            name="Value",
-        )
-        self.steering_setpoint_plot_data = self.steering_plot.plot(
-            self.steering_setpoint_data,
-            PLOT_TIME_STEPS,
-            pen=pg.mkPen(QColor(255, 0, 0, 128), style=Qt.DashLine),
-            name="Setpoint",
-        )
-
-        self.map_plot = pg.PlotWidget()
-        self.map_plot.setMinimumSize(
-            SimulationCameraSettings.WIDTH, SimulationCameraSettings.HEIGHT
-        )  # Adjust the size as needed
-        self.map_plot.setXRange(-8000, 8000)  # Adjust the range as needed
-        self.map_plot.setYRange(-8000, 8000)  # Adjust the range as needed
-        self.map_plot.getPlotItem().showGrid(x=True, y=True)
-        self.map_plot.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
-        self.arrow = pg.ArrowItem(
-            angle=90,
-            tipAngle=30,
-            baseAngle=20,
-            headLen=20,
-            tailLen=10,
-            headWidth=10,
-            tailWidth=4,
-            pen={"color": "g", "width": 2},
-        )
-        self.map_plot.addItem(self.arrow)
-        self.arrow.setZValue(1)
-
-        # Create a deque to store the past positions
-        self.map_plot_positions_x = deque(maxlen=DATA_QUEUE_SIZE)
-        self.map_plot_positions_y = deque(maxlen=DATA_QUEUE_SIZE)
-
-        # Create a PlotCurveItem to represent the path
-        self.path = pg.PlotCurveItem(
-            pen=pg.mkPen(QColor(255, 255, 255, 255), width=2, style=Qt.DashLine)
-        )
-        gradient = QLinearGradient(0, 0, 0, 1)
-        gradient.setColorAt(0, QColor(255, 255, 255, 255))
-        gradient.setColorAt(1, QColor(255, 255, 255, 64))
-        self.path.setBrush(QBrush(gradient))
-
-        self.map_plot.addItem(self.path)
-
-        layout = QGridLayout(self)
-
-        # layout.addWidget(self.map_plot, 0, 0)
-        # layout.addWidget(self.rgb_label, 0, 1)
-        # layout.addWidget(self.depth_label, 1, 1)
-        # layout.addWidget(self.speed_plot, 0, 2)
-        # layout.addWidget(self.steering_plot, 1, 2)
-
-        layout.addWidget(self.rgb_label, 0, 0)
-        layout.addWidget(self.depth_label, 1, 0)
-        layout.addWidget(self.speed_plot, 0, 1)
-        layout.addWidget(self.steering_plot, 1, 1)
-        self.setStyleSheet("background-color: #2d2a2e;")
-
-    def update_image(self, data):
-        (
-            speed,
-            speed_setpoint,
-            steering,
-            steering_setpoint,
-            x,
-            y,
-            yaw,
-            qimage_rgb,
-            qimage_depth,
-        ) = data
-        # RGB
-        self.rgb_pixmap.convertFromImage(qimage_rgb)
-        self.rgb_label.setPixmap(self.rgb_pixmap)
-        # Depth
-        self.depth_pixmap.convertFromImage(qimage_depth)
-        self.depth_label.setPixmap(self.depth_pixmap)
-        # Plot speed
-        self.speed_data.append(speed)
-        self.speed_plot_data.setData(PLOT_TIME_STEPS, self.speed_data)
-        self.speed_marker.setData([PLOT_TIME_STEPS[-1]], [speed])
-        self.speed_setpoint_data.append(speed_setpoint)
-        self.speed_setpoint_plot_data.setData(PLOT_TIME_STEPS, self.speed_setpoint_data)
-        # Plot steering
-        self.steering_data.append(steering)
-        self.steering_plot_data.setData(self.steering_data, PLOT_TIME_STEPS)
-        self.steering_marker.setData([steering], [PLOT_TIME_STEPS[-1]])
-        self.steering_setpoint_data.append(steering_setpoint)
-        self.steering_setpoint_plot_data.setData(self.steering_setpoint_data, PLOT_TIME_STEPS)
-        # Arrow
-        self.arrow.setPos(y, x)
-        self.arrow.setStyle(angle=yaw + 90)
-        # Add the new position to the deque
-        self.map_plot_positions_x.append(x)
-        self.map_plot_positions_y.append(y)
-
-        self.path.setData(list(self.map_plot_positions_y), list(self.map_plot_positions_x))
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = None
-
-
 class Renderer:
     def __init__(
         self,
-        q_image: SharedBuffer.Reader,
-        q_sensor: SharedBuffer.Reader,
-        q_control: SharedBuffer.Reader,
+        q_image: SPMCQueue,
+        q_sensor: SPMCQueue,
+        q_control: SPMCQueue,
     ):
-        self._app = QApplication(sys.argv)
-        self._t_data = VehicleRendererData(q_image=q_image, q_sensor=q_sensor, q_control=q_control)
-        self._app.aboutToQuit.connect(self._stop_thread_and_wait)
+        self._q_image = q_image
+        self._q_sensor = q_sensor
+        self._q_control = q_control
 
     def run(self):
+        app = QApplication(sys.argv)
+        app.aboutToQuit.connect(self._stop_thread_and_wait)
+
         ex: QWidget = VehicleRendererApp()
-        self._t_data.finished.connect(self._app.exit)
-        self._t_data.image_data_ready.connect(ex.update_image)
-        self._t_data.start()
-        ex.show()
-        return self._app.exec()
+
+        self._t_ui_setup = RendererUISetup(
+            q_image=self._q_image, q_sensor=self._q_sensor, q_control=self._q_control
+        )
+        self._t_ui_setup.ui_setup_data_ready.connect(ex.init_window)
+        self._t_ui_setup.start()
+
+        self._t_image_data = RendererImageData(q_image=self._q_image)
+        self._t_image_data.image_data_ready.connect(ex.update_image_data)
+        # self._t_image_data.finished.connect(app.exit)
+        self._t_image_data.start()
+
+        self._t_sensor_data = RendererSensorData(q_sensor=self._q_sensor)
+        self._t_sensor_data.sensor_data_ready.connect(ex.update_sensor_data)
+        self._t_sensor_data.start()
+
+        return app.exec()
 
     def _stop_thread_and_wait(self):
-        self._t_data.stop()
-        self._t_data.wait()
+        self._t_image_data.stop()
+        self._t_sensor_data.stop()
+        self._t_image_data.wait()
+        self._t_sensor_data.wait()
