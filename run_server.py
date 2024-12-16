@@ -3,20 +3,20 @@
 import sys
 
 
-from ToySim.server import Network
-from ToySim.processor import Processor
-from ToySim.render import Renderer
-from ToySim.ipc import SPMCQueue
+from ToySim.modules.network import NetworkServer
+from ToySim.modules.processor import Processor
+from ToySim.modules.render import Renderer
+from ToySim.utils.ipc import SPMCQueue
 
 
 def main():
     q_image = SPMCQueue(port=10001)
     q_sensor = SPMCQueue(port=10002)
-    q_control = SPMCQueue(port=10003)
+    q_remote = SPMCQueue(port=10003)
 
-    p_network = Network(q_image=q_image, q_sensor=q_sensor, q_control=q_control)
-    p_processor = Processor(q_image=q_image, q_sensor=q_sensor, q_control=q_control)
-    renderer = Renderer(q_image=q_image, q_sensor=q_sensor, q_control=q_control)
+    p_network = NetworkServer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
+    p_processor = Processor(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
+    renderer = Renderer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
 
     processes = [p_network, p_processor]
 

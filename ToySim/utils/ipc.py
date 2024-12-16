@@ -1,6 +1,10 @@
 import zmq
 
 from typing import Any
+from multiprocessing import Value
+
+# TODO: SHAREDFILE (should be the same for server and car, manual sync for now)
+
 
 class SPMCQueue:
     """Single Producer Multiple Consumers Queue using ZMQ IPC sockets
@@ -10,11 +14,11 @@ class SPMCQueue:
 
     def __init__(self, port: int):
         self._port = port
-        self._has_producer = False
+        self._has_producer = Value("b", False)
 
     def get_producer(self):
-        assert not self._has_producer, f"[{self.__class__.__name__}] Producer already exists"
-        self._has_producer = True
+        assert not self._has_producer.value, f"[{self.__class__.__name__}] Producer already exists"
+        self._has_producer.value = True
         return SPMCQueue.Producer(self._port)
 
     def get_consumer(self):

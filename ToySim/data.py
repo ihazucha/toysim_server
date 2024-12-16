@@ -1,5 +1,6 @@
 import struct
 from typing import Type
+import numpy as np  # Add this import for numpy
 
 
 class SerializableMeta(type):
@@ -164,6 +165,52 @@ class ActuatorsData(SerializablePrimitive):
 
     def to_list(self):
         return [self.timestamp, self.motor_power, self.steering_angle, self.speed]
+
+
+class RawImageData(Serializable):    
+    def __init__(self, timestamp: int, image_array: np.ndarray):
+        self.timestamp = timestamp
+        self.image_array = image_array
+
+    @classmethod
+    def from_bytes(cls, data: bytes):
+        image_array = np.frombuffer(data[:-8], dtype=np.uint8)
+        timestamp = struct.unpack('=Q', data[-8:])[0]
+        return cls(timestamp, image_array)
+
+    def to_bytes(self):
+        image_array_bytes = self.image_array.tobytes()
+        timestamp_bytes = struct.pack('=Q', self.timestamp)
+        return image_array_bytes + timestamp_bytes
+
+    def to_list(self):
+        return [self.timestamp, self.image_array]
+
+    @property
+    def SIZE(self):
+        return struct.calcsize("=Q") + self.image_array.nbytes
+
+class JPGImageData(Serializable):    
+    def __init__(self, timestamp: int, jpg: bytes):
+        self.timestamp = timestamp
+        self.jpg = jpg
+
+    @classmethod
+    def from_bytes(cls, data: bytes):
+        timestamp = struct.unpack('=Q', data[-8:])[0]
+        return cls(timestamp, data[:-8])
+
+    def to_bytes(self):
+        timestamp_bytes = struct.pack('=Q', self.timestamp)
+        return self.jpg + timestamp_bytes
+
+    def to_list(self):
+        return [self.timestamp, self.jpg]
+
+    @property
+    def SIZE(self):
+        return struct.calcsize("=Q") + len(self.jpg)
+
 
 
 class SensorData(SerializableComplex):

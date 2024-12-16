@@ -8,11 +8,11 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QImage, QPixmap, QColor, QBrush, QLinearGradient, QVector3D
 from PySide6.QtWidgets import QApplication, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel, QWidget
 import pyqtgraph as pg  # type: ignore
-import pyqtgraph.opengl as gl  # type: ignore
+import pyqtgraph.opengl as gl
+from websockets import StatusLike  # type: ignore
 
-from .settings import ClientTypes, SimulationCameraSettings, VehicleCamera
-
-from ToySim.ipc import SPMCQueue
+from ToySim.data import JPGImageData
+from ToySim.utils.ipc import SPMCQueue
 
 
 FPS = 60
@@ -51,19 +51,19 @@ class RendererUISetup(QThread):
         self,
         q_image: SPMCQueue,
         q_sensor: SPMCQueue,
-        q_control: SPMCQueue,
+        q_remote: SPMCQueue,
     ):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
-        self._q_control = q_control
+        self._q_remote = q_remote
 
     def run(self):
         q_image = self._q_image.get_consumer()
         # q_sensor = self._q_sensor.get_consumer()
-        # q_control = self._q_control.get_consumer()
-        image_jpg, _ = q_image.get()
-        image_array = cv2.imdecode(np.frombuffer(image_jpg, np.uint8), cv2.IMREAD_COLOR)
+        # q_remote = self._q_remote.get_consumer()
+        jpg_image_data: JPGImageData = q_image.get()
+        image_array = cv2.imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), cv2.IMREAD_COLOR)
         height, width, _ = image_array.shape
         self.ui_setup_data_ready.emit((width, height))
 
@@ -79,10 +79,12 @@ class RendererImageData(QThread):
     def run(self):
         q_image = self._q_image.get_consumer()
         while self._is_running:
-            jpg, timestamp = q_image.get()
-            self.image_data_ready.emit((self._jpg2qimage(jpg), timestamp))
+            jpg_image_data: JPGImageData = q_image.get()
+            self.image_data_ready.emit(
+                (self._jpg2qimage(jpg_image_data.jpg), jpg_image_data.timestamp)
+            )
 
-    def _jpg2qimage(jpg):
+    def _jpg2qimage(self, jpg):
         image_array = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
         height, width, channel = image_array.shape
         bytes_per_line = channel * width
@@ -373,7 +375,6 @@ class VehicleRendererApp(QWidget):
         #     vehicle_data.pose.rotation.yaw,
         # )
 
-
     def update_imu_plot(self, rotation):
         roll, pitch, yaw = (
             np.deg2rad(rotation.roll),
@@ -440,11 +441,11 @@ class Renderer:
         self,
         q_image: SPMCQueue,
         q_sensor: SPMCQueue,
-        q_control: SPMCQueue,
+        q_remote: SPMCQueue,
     ):
         self._q_image = q_image
         self._q_sensor = q_sensor
-        self._q_control = q_control
+        self._q_remote = q_remote
 
     def run(self):
         app = QApplication(sys.argv)
@@ -453,7 +454,7 @@ class Renderer:
         ex: QWidget = VehicleRendererApp()
 
         self._t_ui_setup = RendererUISetup(
-            q_image=self._q_image, q_sensor=self._q_sensor, q_control=self._q_control
+            q_image=self._q_image, q_sensor=self._q_sensor, q_remote=self._q_remote
         )
         self._t_ui_setup.ui_setup_data_ready.connect(ex.init_window)
         self._t_ui_setup.start()
