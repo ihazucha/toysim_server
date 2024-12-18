@@ -8,8 +8,7 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QImage, QPixmap, QColor, QBrush, QLinearGradient, QVector3D
 from PySide6.QtWidgets import QApplication, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel, QWidget
 import pyqtgraph as pg  # type: ignore
-import pyqtgraph.opengl as gl
-from websockets import StatusLike  # type: ignore
+import pyqtgraph.opengl as gl  # type: ignore
 
 from ToySim.data import JPGImageData
 from ToySim.utils.ipc import SPMCQueue
@@ -113,6 +112,8 @@ class RendererSensorData(QThread):
 
 
 class VehicleRendererApp(QWidget):
+    window_init_finished = Signal()
+
     def __init__(self):
         super().__init__()
 
@@ -130,6 +131,7 @@ class VehicleRendererApp(QWidget):
         self._w_init_layout()
 
         self.show()
+        self.window_init_finished.emit()
 
     def _w_init_main_window(self):
         self.setWindowTitle("ToySim UI")
@@ -462,7 +464,7 @@ class Renderer:
         self._t_image_data = RendererImageData(q_image=self._q_image)
         self._t_image_data.image_data_ready.connect(ex.update_image_data)
         # self._t_image_data.finished.connect(app.exit)
-        self._t_image_data.start()
+        ex.window_init_finished.connect(self._t_image_data.start)
 
         self._t_sensor_data = RendererSensorData(q_sensor=self._q_sensor)
         self._t_sensor_data.sensor_data_ready.connect(ex.update_sensor_data)

@@ -21,6 +21,6 @@ class Processor(Process):
         q_remote = self._q_remote.get_producer()
         while True:
             control_data = RemoteControlData(time(), 0.0, 0.0)
-            q_remote.put(control_data.to_bytes())
+            q_remote.put(control_data)
             # TODO: artificial sleep to prevent UDP bombardment
             sleep(0.05)

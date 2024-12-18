@@ -25,7 +25,8 @@ class ImageGenerator(Process):
             img = np.zeros((h, w, 3), dtype=np.uint8)        
             img[i : i + 10, :, 1] = 255
             i = (i + 5) % h
-            img_data = RawImageData(timestamp=int(time.time() * 1000000), image_array=img)
+            int_timestamp = int(time.time() * 1e6)
+            img_data = RawImageData(timestamp=int_timestamp, image_array=img)
             q.put(img_data)
             time.sleep(0.016)
 

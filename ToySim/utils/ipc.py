@@ -3,12 +3,9 @@ import zmq
 from typing import Any
 from multiprocessing import Value
 
-# TODO: SHAREDFILE (should be the same for server and car, manual sync for now)
-
 
 class SPMCQueue:
-    """Single Producer Multiple Consumers Queue using ZMQ IPC sockets
-    """
+    """Single Producer Multiple Consumers Queue using ZMQ IPC sockets"""
 
     ZMQ_CONTEXT = zmq.Context()
 
