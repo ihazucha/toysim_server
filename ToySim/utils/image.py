@@ -5,9 +5,11 @@ import numpy as np
 
 # TODO: SHAREDFILE (should be the same for server and car, manual sync for now)
 
+
 def jpg_encode(image: MatLike, quality: int) -> np.ndarray:
     _, jpg = imencode(".jpg", image, [int(IMWRITE_JPEG_QUALITY), quality])
     return jpg
+
 
 def jpg_decode(jpg: Union[bytes, np.ndarray]) -> MatLike:
     return imdecode(np.frombuffer(jpg, np.uint8), IMREAD_COLOR)

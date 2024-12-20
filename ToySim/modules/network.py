@@ -13,7 +13,7 @@ from ToySim.data import JPGImageData, RawImageData
 MAX_DGRAM_SIZE = 2**16
 
 
-def get_local_ip():
+def get_local_ip() -> str:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
@@ -36,7 +36,6 @@ class ImageDataSender(Thread):
         q = self._q_image.get_consumer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect(self._addr)
             self._sock = sock
             while True:
                 raw_image_data: RawImageData = q.get()
@@ -51,7 +50,7 @@ class ImageDataSender(Thread):
         start_pos = 0
         while segment_count:
             end_pos = min(size, start_pos + self.__class__.MAX_DATA_SIZE)
-            self._sock.send(header + image_mv[start_pos:end_pos])
+            self._sock.sendto(header + image_mv[start_pos:end_pos], self._addr)
             start_pos = end_pos
             segment_count -= 1
 
@@ -72,7 +71,7 @@ class ImageDataReceiver(Thread):
                 jpg_image_data = self._recv()
                 q.put(jpg_image_data)
 
-    def _recv(self) -> tuple[bytes, int]:
+    def _recv(self) -> JPGImageData:
         jpg_data = b""
         segment = 255
         while segment != 1:
@@ -95,10 +94,9 @@ class SensorDataSender(Thread):
         q = self._q_sensor.get_consumer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect(self._addr)
             while True:
                 dataframe = q.get()
-                sock.send(dataframe.to_bytes())
+                sock.sendto(dataframe.to_bytes(), self._addr)
 
 
 class SensorDataReceiver(Thread):
@@ -138,11 +136,10 @@ class RemoteDataSender(Thread):
     def run(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.connect(self._addr)
             q = self._q_remote.get_consumer()
             while True:
                 data = q.get()
-                s.send(data.to_bytes())
+                s.sendto(data.to_bytes(), self._addr)
 
 
 class RemoteDataReceiver(Thread):
@@ -188,15 +185,22 @@ class NetworkClient(Process):
 
 
 class NetworkServer(Process):
-    def __init__(self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue):
+    def __init__(
+        self,
+        q_image: SPMCQueue,
+        q_sensor: SPMCQueue,
+        q_remote: SPMCQueue,
+        server_ip: str = get_local_ip(),
+    ):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
         self._q_remote = q_remote
+        self._server_ip = server_ip
 
     def run(self):
-        t_image = ImageDataReceiver(q_image=self._q_image, addr=(get_local_ip(), 5500))
-        t_sensor = SensorDataReceiver(q_sensor=self._q_sensor, addr=(get_local_ip(), 5510))
+        t_image = ImageDataReceiver(q_image=self._q_image, addr=(self._server_ip, 5500))
+        t_sensor = SensorDataReceiver(q_sensor=self._q_sensor, addr=(self._server_ip, 5510))
         t_remote = RemoteDataSender(q_remote=self._q_remote, addr=(t_sensor.get_client_ip(), 5520))
         threads = [t_image, t_sensor, t_remote]
         [t.start() for t in threads]

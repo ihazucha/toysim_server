@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 
 import sys
+from argparse import ArgumentParser
 
-
-from ToySim.modules.network import NetworkServer
+from ToySim.modules.network import NetworkServer, get_local_ip
 from ToySim.modules.processor import Processor
 from ToySim.modules.render import Renderer
 from ToySim.utils.ipc import SPMCQueue
 
 
+def parse_args():
+    parser = ArgumentParser(description="Runs ToySim UI")
+    parser.add_argument("-i", "--ip", type=str, default=get_local_ip(), help="Addr where UI (server) listens")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     q_image = SPMCQueue(port=10001)
     q_sensor = SPMCQueue(port=10002)
     q_remote = SPMCQueue(port=10003)
 
-    p_network = NetworkServer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
+    p_network = NetworkServer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote, server_ip=args.ip)
     p_processor = Processor(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
     renderer = Renderer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
 
