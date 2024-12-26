@@ -1,5 +1,5 @@
 from pydualsense import pydualsense  # type: ignore
-from data import RemoteControlData  # type: ignore
+from utils.data import RemoteControlData  # type: ignore
 from multiprocessing import Queue
 
 import time

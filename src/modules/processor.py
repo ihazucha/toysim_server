@@ -1,8 +1,8 @@
 from multiprocessing import Process
 from time import time, sleep
 
-from ToySim.utils.ipc import SPMCQueue  # type: ignore
-from ToySim.data import RemoteControlData
+from utils.ipc import SPMCQueue  # type: ignore
+from utils.data import RemoteControlData
 
 
 class Processor(Process):

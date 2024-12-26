@@ -6,9 +6,9 @@ from multiprocessing import Process
 from threading import Thread
 from typing import Tuple
 
-from ToySim.utils.ipc import SPMCQueue
-from ToySim.utils.image import jpg_encode
-from ToySim.data import JPGImageData, RawImageData
+from utils.ipc import SPMCQueue
+from utils.image import jpg_encode
+from utils.data import JPGImageData, RawImageData, SensorData
 
 MAX_DGRAM_SIZE = 2**16
 
@@ -121,7 +121,8 @@ class SensorDataReceiver(Thread):
         q = self._q_sensor.get_producer()
         while True:
             data, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
-            q.put(data)
+            decoded_data = SensorData.from_bytes(data)
+            q.put(decoded_data)
 
 
 # --------------------

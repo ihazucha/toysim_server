@@ -10,8 +10,9 @@ from PySide6.QtWidgets import QApplication, QGridLayout, QVBoxLayout, QHBoxLayou
 import pyqtgraph as pg  # type: ignore
 import pyqtgraph.opengl as gl  # type: ignore
 
-from ToySim.data import JPGImageData
-from ToySim.utils.ipc import SPMCQueue
+
+from utils.data import JPGImageData
+from utils.ipc import SPMCQueue
 
 
 FPS = 60
@@ -59,8 +60,6 @@ class RendererUISetup(QThread):
 
     def run(self):
         q_image = self._q_image.get_consumer()
-        # q_sensor = self._q_sensor.get_consumer()
-        # q_remote = self._q_remote.get_consumer()
         jpg_image_data: JPGImageData = q_image.get()
         image_array = cv2.imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), cv2.IMREAD_COLOR)
         height, width, _ = image_array.shape
@@ -127,7 +126,7 @@ class VehicleRendererApp(QWidget):
         self._w_init_steering_plot()
         self._w_init_map_plot()
         self._w_init_imu_plot()
-        self._w_init_encoders_plot()
+        self._w_init_plt_encoders()
         self._w_init_layout()
 
         self.show()
@@ -280,21 +279,28 @@ class VehicleRendererApp(QWidget):
         self.imu_plot.addItem(y_label)
         self.imu_plot.addItem(z_label)
 
-    def _w_init_encoders_plot(self):
-        self.left_encoder_plot = pg.PlotWidget()
-        self.right_encoder_plot = pg.PlotWidget()
-        self.left_encoder_plot.setAspectLocked()
-        self.left_encoder_plot.setXRange(-500, 500)
-        self.left_encoder_plot.setYRange(-500, 500)
-        self.left_encoder_plot.getPlotItem().showGrid(x=True, y=True)
-        self.left_encoder_plot.getPlotItem().setTitle("Left Encoder Data")
-        self.left_encoder_data = deque(maxlen=150)
-        self.left_encoder_scatter = pg.ScatterPlotItem(
-            size=5, pen=pg.mkPen(None), brush=pg.mkBrush(255, 255, 255, 120)
+    def _w_init_plt_encoders(self):
+        self.plt_encoders = pg.PlotWidget()
+        # self.right_encoder_plot = pg.PlotWidget()
+        self.plt_encoders.setAspectLocked()
+        self.plt_encoders.setXRange(-250, 250)
+        self.plt_encoders.setYRange(-250, 250)
+        self.plt_encoders.getPlotItem().showGrid(x=True, y=True)
+        self.plt_encoders.getPlotItem().setTitle("Encoders Data")
+        self.plt_encoders_left_data = deque(maxlen=150)
+        self.plt_encoders_right_data = deque(maxlen=150)
+        self.plt_encoders_left_scatter = pg.ScatterPlotItem(
+            size=5, pen=pg.mkPen(None), brush=pg.mkBrush(255, 0, 0, 120)
         )
-        self.left_encoder_plot.addItem(self.left_encoder_scatter)
-        self.left_encoder_curve = pg.PlotCurveItem(pen=pg.mkPen("w", width=1))
-        self.left_encoder_plot.addItem(self.left_encoder_curve)
+        self.plt_encoders_right_scatter = pg.ScatterPlotItem(
+            size=5, pen=pg.mkPen(None), brush=pg.mkBrush(0, 255, 0, 120)
+        )
+        self.plt_encoders.addItem(self.plt_encoders_left_scatter)
+        self.plt_encoders.addItem(self.plt_encoders_right_scatter)
+        self.plt_encoders_left_curve = pg.PlotCurveItem(pen=pg.mkPen("r", width=1))
+        self.plt_encoders_right_curve = pg.PlotCurveItem(pen=pg.mkPen("g", width=1))
+        self.plt_encoders.addItem(self.plt_encoders_left_curve)
+        self.plt_encoders.addItem(self.plt_encoders_right_curve)
 
     def _w_init_layout(self):
         imu_layout = QHBoxLayout()
@@ -302,8 +308,8 @@ class VehicleRendererApp(QWidget):
         imu_layout.addWidget(self.map_plot)
 
         encoders_layout = QHBoxLayout()
-        encoders_layout.addWidget(self.left_encoder_plot)
-        encoders_layout.addWidget(self.right_encoder_plot)
+        encoders_layout.addWidget(self.plt_encoders)
+        encoders_layout.addWidget(QLabel("Placeholder for Right Encoder Plot"))
 
         left_layout = QVBoxLayout()
         left_layout.addLayout(imu_layout)
@@ -370,7 +376,7 @@ class VehicleRendererApp(QWidget):
         # self.path.setData(list(self.map_plot_positions_x), list(self.map_plot_positions_y))
 
         # self.update_imu_plot(vehicle_data.pose.rotation)
-        # self.update_left_encoder_plot(vehicle_data.encoder_data)
+        self._w_update_plt_encoders(data.rleft_encoder, data.rright_encoder)
         # self.update_orientation_lines(
         #     vehicle_data.pose.position.x,
         #     vehicle_data.pose.position.y,
@@ -419,22 +425,31 @@ class VehicleRendererApp(QWidget):
         self.arrow_y.setTransform(R)
         self.arrow_z.setTransform(R)
 
-    def update_left_encoder_plot(self, encoder_data):
+    def _w_update_plt_encoders(self, left_data, right_data):
         # Convert polar coordinates to Cartesian coordinates
-        position, magnitude = encoder_data.position, encoder_data.magnitude
-        rad = np.deg2rad(position * RAW2DEG)
-        x = magnitude * np.cos(rad)
-        y = magnitude * np.sin(rad)
+        l_rad = np.deg2rad(left_data.position * RAW2DEG)
+        l_x = left_data.magnitude * np.cos(l_rad)
+        l_y = left_data.magnitude * np.sin(l_rad)
+        r_rad = np.deg2rad(right_data.position * RAW2DEG)
+        r_x = right_data.magnitude * np.cos(r_rad)
+        r_y = right_data.magnitude * np.sin(r_rad)
 
         # Append the new data point to the deque
-        self.left_encoder_data.append((x, y))
+        self.plt_encoders_left_data.append((l_x, l_y))
+        self.plt_encoders_right_data.append((r_x, l_y))
 
-        # Update the scatter plot and curve with the new data
-        self.left_encoder_scatter.setData(
-            [p[0] for p in self.left_encoder_data], [p[1] for p in self.left_encoder_data]
+        # TODO - try to only add new data without full redraw
+        self.plt_encoders_left_scatter.setData(
+            [p[0] for p in self.plt_encoders_left_data], [p[1] for p in self.plt_encoders_left_data]
         )
-        self.left_encoder_curve.setData(
-            [p[0] for p in self.left_encoder_data], [p[1] for p in self.left_encoder_data]
+        self.plt_encoders_left_curve.setData(
+            [p[0] for p in self.plt_encoders_left_data], [p[1] for p in self.plt_encoders_left_data]
+        )
+        self.plt_encoders_right_scatter.setData(
+            [p[0] for p in self.plt_encoders_right_data], [p[1] for p in self.plt_encoders_right_data]
+        )
+        self.plt_encoders_right_curve.setData(
+            [p[0] for p in self.plt_encoders_right_data], [p[1] for p in self.plt_encoders_right_data]
         )
 
 

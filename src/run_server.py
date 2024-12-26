@@ -3,10 +3,10 @@
 import sys
 from argparse import ArgumentParser
 
-from ToySim.modules.network import NetworkServer, get_local_ip
-from ToySim.modules.processor import Processor
-from ToySim.modules.render import Renderer
-from ToySim.utils.ipc import SPMCQueue
+from modules.network import NetworkServer, get_local_ip
+from modules.processor import Processor
+from modules.render import Renderer
+from utils.ipc import SPMCQueue
 
 
 def parse_args():

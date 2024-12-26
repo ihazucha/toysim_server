@@ -7,9 +7,9 @@ import numpy as np
 
 from multiprocessing import Process
 
-from ToySim.utils.ipc import SPMCQueue
-from ToySim.data import RawImageData, SensorData, IMUData, EncoderData, Pose, Position, Rotation, RemoteControlData
-from ToySim.modules.network import NetworkClient, get_local_ip
+from src.utils.ipc import SPMCQueue
+from src.utils.data import RawImageData, SensorData, IMUData, EncoderData, Pose, Position, Rotation, RemoteControlData
+from src.modules.network import NetworkClient, get_local_ip
 
 
 class ImageGenerator(Process):
