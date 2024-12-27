@@ -1,5 +1,5 @@
 from multiprocessing import Process
-from time import time, sleep
+from time import time_ns, sleep
 
 from utils.ipc import SPMCQueue  # type: ignore
 from utils.data import RemoteControlData
@@ -20,7 +20,7 @@ class Processor(Process):
     def run(self):
         q_remote = self._q_remote.get_producer()
         while True:
-            control_data = RemoteControlData(time(), 0.0, 0.0)
+            control_data = RemoteControlData(time_ns(), 0.0, 0.0)
             q_remote.put(control_data)
             # TODO: artificial sleep to prevent UDP bombardment
             sleep(0.05)

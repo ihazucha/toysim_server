@@ -25,7 +25,7 @@ class ImageGenerator(Process):
             img = np.zeros((h, w, 3), dtype=np.uint8)        
             img[i : i + 10, :, 1] = 255
             i = (i + 5) % h
-            int_timestamp = int(time.time() * 1e6)
+            int_timestamp = int(time.time_ns() * 1e6)
             img_data = RawImageData(timestamp=int_timestamp, image_array=img)
             q.put(img_data)
             time.sleep(0.016)
@@ -39,7 +39,7 @@ class SensorGenerator(Process):
         q = self._q_sensor.get_producer()
         t = 0.0
         while True:
-            ts = time.time()
+            ts = time.time_ns()
             sint = math.sin(t)
             cost = math.sin(t)
             imu_data = IMUData(ts, sint, sint, sint, cost, cost, cost)

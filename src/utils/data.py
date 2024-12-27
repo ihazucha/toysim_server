@@ -1,6 +1,6 @@
 import struct
 from typing import Type
-import numpy as np  # Add this import for numpy
+import numpy as np
 
 
 class SerializableMeta(type):
@@ -59,10 +59,23 @@ class SerializableComplex(Serializable):
         return cls(*objects)
 
     def to_bytes(self):
-        return b''.join([c.to_bytes() for c in self.to_list()])
+        return b"".join([c.to_bytes() for c in self.to_list()])
 
 
 # -------------------------------------------------------------------------------------------------
+
+
+# TODO: use timestamp to have precise time and ID to look for lost data
+class DataHeader(SerializablePrimitive):
+    FORMAT = "=2Q"
+    SIZE = struct.calcsize(FORMAT)
+
+    def __init__(self, timestamp: int, id: int = 0):
+        self.timestamp = timestamp
+        self.id = id
+
+    def to_list(self):
+        return [self.timestamp, self.id]
 
 
 class Position(SerializablePrimitive):
@@ -100,12 +113,12 @@ class Pose(SerializableComplex):
 
 
 class IMUData(SerializablePrimitive):
-    FORMAT = "=7d"
+    FORMAT = "=Q6d"
     SIZE = struct.calcsize(FORMAT)
 
     def __init__(
         self,
-        timestamp: float,
+        timestamp: int,
         ax: float,
         ay: float,
         az: float,
@@ -134,10 +147,10 @@ class IMUData(SerializablePrimitive):
 
 
 class EncoderData(SerializablePrimitive):
-    FORMAT = "=diid"
+    FORMAT = "=Qiid"
     SIZE = struct.calcsize(FORMAT)
 
-    def __init__(self, timestamp: float, position: int, magnitude: int, speed: float):
+    def __init__(self, timestamp: int, position: int, magnitude: int, speed: float):
         self.timestamp = timestamp
         self.position = position
         self.magnitude = magnitude
@@ -148,12 +161,12 @@ class EncoderData(SerializablePrimitive):
 
 
 class ActuatorsData(SerializablePrimitive):
-    FORMAT = "=4d"
+    FORMAT = "=Q3d"
     SIZE = struct.calcsize(FORMAT)
 
     def __init__(
         self,
-        timestamp: float,
+        timestamp: int,
         motor_power: float,
         steering_angle: float,
         speed: float,
@@ -167,7 +180,7 @@ class ActuatorsData(SerializablePrimitive):
         return [self.timestamp, self.motor_power, self.steering_angle, self.speed]
 
 
-class RawImageData(Serializable):    
+class RawImageData(Serializable):
     def __init__(self, timestamp: int, image_array: np.ndarray):
         self.timestamp = timestamp
         self.image_array = image_array
@@ -175,12 +188,12 @@ class RawImageData(Serializable):
     @classmethod
     def from_bytes(cls, data: bytes):
         image_array = np.frombuffer(data[:-8], dtype=np.uint8)
-        timestamp = struct.unpack('=Q', data[-8:])[0]
+        timestamp = struct.unpack("=Q", data[-8:])[0]
         return cls(timestamp, image_array)
 
     def to_bytes(self):
         image_array_bytes = self.image_array.tobytes()
-        timestamp_bytes = struct.pack('=Q', self.timestamp)
+        timestamp_bytes = struct.pack("=Q", self.timestamp)
         return image_array_bytes + timestamp_bytes
 
     def to_list(self):
@@ -190,18 +203,19 @@ class RawImageData(Serializable):
     def SIZE(self):
         return struct.calcsize("=Q") + self.image_array.nbytes
 
-class JPGImageData(Serializable):    
+
+class JPGImageData(Serializable):
     def __init__(self, timestamp: int, jpg: bytes):
         self.timestamp = timestamp
         self.jpg = jpg
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        timestamp = struct.unpack('=Q', data[-8:])[0]
+        timestamp = struct.unpack("=Q", data[-8:])[0]
         return cls(timestamp, data[:-8])
 
     def to_bytes(self):
-        timestamp_bytes = struct.pack('=Q', self.timestamp)
+        timestamp_bytes = struct.pack("=Q", self.timestamp)
         return self.jpg + timestamp_bytes
 
     def to_list(self):
@@ -210,7 +224,6 @@ class JPGImageData(Serializable):
     @property
     def SIZE(self):
         return struct.calcsize("=Q") + len(self.jpg)
-
 
 
 class SensorData(SerializableComplex):
@@ -234,10 +247,10 @@ class SensorData(SerializableComplex):
 
 
 class RemoteControlData(SerializablePrimitive):
-    FORMAT = "=3d"
+    FORMAT = "=Q2d"
     SIZE = struct.calcsize(FORMAT)
 
-    def __init__(self, timestamp: float, set_speed: float, set_steering_angle: float):
+    def __init__(self, timestamp: int, set_speed: float, set_steering_angle: float):
         self.timestamp = timestamp
         self.set_speed = set_speed
         self.set_steering_angle = set_steering_angle
