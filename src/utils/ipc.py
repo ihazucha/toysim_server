@@ -16,20 +16,22 @@ class SPMCQueue:
     def get_producer(self):
         assert not self._has_producer.value, f"[{self.__class__.__name__}] Producer already exists"
         self._has_producer.value = True
-        return SPMCQueue.Producer(self._port)
+        return SPMCQueue.Producer(self._port, self._has_producer)
 
     def get_consumer(self):
         return SPMCQueue.Consumer(self._port)
 
     class Producer:
-        def __init__(self, port: int):
+        def __init__(self, port: int, has_producer):
             self._port = port
+            self._has_producer = has_producer
             self._socket = SPMCQueue.ZMQ_CONTEXT.socket(zmq.PUB)
             self._socket.bind(f"tcp://*:{self._port}")
 
         def __del__(self):
             if self._socket and not self._socket.closed:
                 self._socket.close()
+            self._has_producer.value = False
 
         def put(self, data: Any):
             self._socket.send_pyobj(data)
@@ -45,5 +47,8 @@ class SPMCQueue:
             if self._socket and not self._socket.closed:
                 self._socket.close()
 
-        def get(self) -> Any:
+        def get(self, timeout: int = None) -> Any:
+            e = self._socket.poll(timeout)
+            if e == 0:
+                return None
             return self._socket.recv_pyobj()

@@ -1,18 +1,43 @@
 import sys
 import time
 import cv2
+import os
 import numpy as np
+
 from collections import deque
+from typing import Any
 
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtGui import QImage, QPixmap, QColor, QBrush, QLinearGradient, QVector3D
-from PySide6.QtWidgets import QApplication, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel, QWidget
-import pyqtgraph as pg  # type: ignore
-import pyqtgraph.opengl as gl  # type: ignore
+from PySide6.QtGui import (
+    QImage,
+    QPixmap,
+    QColor,
+    QBrush,
+    QLinearGradient,
+    QVector3D,
+    QIcon,
+    QAction,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QGridLayout,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QWidget,
+    QToolBar,
+    QListWidget,
+    QDockWidget
+)
+import pyqtgraph as pg
+import pyqtgraph.opengl as gl
 
 
-from utils.data import JPGImageData
+from utils.data import PATH_RECORDS, JPGImageData, SimData, icon_path, record_path
 from utils.ipc import SPMCQueue
+from utils.env import ENV, Environment
+from modules.recorder import RecordWriter
 
 
 FPS = 60
@@ -48,52 +73,126 @@ class RendererUISetup(QThread):
     ui_setup_data_ready = Signal(tuple)
 
     def __init__(
-        self,
-        q_image: SPMCQueue,
-        q_sensor: SPMCQueue,
-        q_remote: SPMCQueue,
+        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue, q_simulation: SPMCQueue
     ):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
         self._q_remote = q_remote
+        self._q_simulation = q_simulation
 
     def run(self):
-        q_image = self._q_image.get_consumer()
-        jpg_image_data: JPGImageData = q_image.get()
-        image_array = cv2.imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), cv2.IMREAD_COLOR)
-        height, width, _ = image_array.shape
-        self.ui_setup_data_ready.emit((width, height))
+        setup_data: tuple | None = None
+        if ENV == Environment.VEHICLE:
+            q_image = self._q_image.get_consumer()
+            jpg_image_data: JPGImageData = q_image.get()
+            image_array = cv2.imdecode(
+                np.frombuffer(jpg_image_data.jpg, np.uint8), cv2.IMREAD_COLOR
+            )
+            height, width, _ = image_array.shape
+            setup_data = (width, height)
+        elif ENV == Environment.SIM:
+            q_simulation = self._q_simulation.get_consumer()
+            sim_data_bytes = q_simulation.get()
+            sim_data: SimData = SimData.from_bytes(sim_data_bytes)
+            height, width, _ = sim_data.camera_data.rgb_image.shape
+            setup_data = (width, height)
+        else:
+            raise NotImplementedError()
+        self.ui_setup_data_ready.emit(setup_data)
+
+
+class RecordingThread(QThread):
+    def __init__(self, q_simulation: SPMCQueue):
+        super().__init__()
+        self._is_recording = False
+        self._record_writer = RecordWriter(q_simulation)
+
+    def run(self):
+        while True:
+            if not self._is_recording:
+                time.sleep(0.1)
+            else:
+                path = record_path(str(time.time_ns()))
+                self._record_writer.write_new(record_path=path)
+
+    def toggle(self, is_recording: bool):
+        if not is_recording:
+            self._record_writer.stop()
+        self._is_recording = is_recording
+
+class RecordSidebar(QDockWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Record Sidebar")
+        self.setFixedWidth(200)
+        widget = QWidget()
+        self.layout = QVBoxLayout(widget)
+        widget.setLayout(self.layout)
+        self.record_list = QListWidget(widget)
+        self.layout.addWidget(self.record_list)
+        self.load_records()
+        self.setWidget(widget)
+
+    def load_records(self):
+        records = os.listdir(PATH_RECORDS)
+        for record in records:
+            self.record_list.addItem(record)
+
+    def add_record(self, record_name):
+        self.record_list.addItem(record_name)
 
 
 class RendererImageData(QThread):
-    image_data_ready = Signal(tuple)
+    sig_image_data = Signal(tuple)
 
-    def __init__(self, q_image: SPMCQueue):
+    def __init__(self, q_image: SPMCQueue, q_simulation: SPMCQueue):
         super().__init__()
         self._q_image = q_image
+        self._q_simulation = q_simulation
         self._is_running = True
 
     def run(self):
-        q_image = self._q_image.get_consumer()
+        if ENV == Environment.VEHICLE:
+            self._run_vehicle()
+        elif ENV == Environment.SIM:
+            self._run_sim()
+        else:
+            raise NotImplementedError()
+
+    def _run_vehicle(self):
+        q = self._q_image.get_consumer()
         while self._is_running:
-            jpg_image_data: JPGImageData = q_image.get()
-            self.image_data_ready.emit(
-                (self._jpg2qimage(jpg_image_data.jpg), jpg_image_data.timestamp)
+            jpg_image_data: JPGImageData = q.get()
+            self.sig_image_data.emit(
+                (RendererImageData.jpg2qimage(jpg_image_data.jpg), jpg_image_data.timestamp)
             )
 
-    def _jpg2qimage(self, jpg):
-        image_array = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-        height, width, channel = image_array.shape
+    def _run_sim(self):
+        q = self._q_simulation.get_consumer()
+        while self._is_running:
+            sim_data_bytes = q.get()
+            sim_data: SimData = SimData.from_bytes(sim_data_bytes)
+            qimage = RendererImageData.array2image(sim_data.camera_data.rgb_image)
+            self.sig_image_data.emit((qimage, sim_data.camera_data.render_enqueued_unix_timestamp))
+
+    @staticmethod
+    def array2image(arr: np.ndarray[Any, np.dtype[np.uint8]]):
+        height, width, channel = arr.shape
         bytes_per_line = channel * width
-        return QImage(image_array.data, width, height, bytes_per_line, QImage.Format_BGR888)
+        return QImage(arr.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+    @staticmethod
+    def jpg2qimage(jpg):
+        image_array = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        return RendererImageData.array2image(image_array)
 
     def stop(self):
         self._is_running = False
 
 
 class RendererSensorData(QThread):
-    sensor_data_ready = Signal(tuple)
+    sig_sensor_data = Signal(tuple)
 
     def __init__(self, q_sensor: SPMCQueue):
         super().__init__()
@@ -104,22 +203,26 @@ class RendererSensorData(QThread):
         q_sensor = self._q_sensor.get_consumer()
         while self._is_running:
             data = q_sensor.get()
-            self.sensor_data_ready.emit(data)
+            self.sig_sensor_data.emit(data)
 
     def stop(self):
         self._is_running = False
 
 
-class VehicleRendererApp(QWidget):
+class VehicleRendererApp(QMainWindow):
     window_init_finished = Signal()
+    sig_toggle_record = Signal(bool)
 
     def __init__(self):
         super().__init__()
+        self.record_sidebar = RecordSidebar(self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.record_sidebar)
 
     def init_window(self, data):
         self._cam_width, self._cam_height = data
 
         self._w_init_main_window()
+        self._w_init_toolbar()
         self._w_init_camera_raw()
         self._w_init_camera_depth()
         self._w_init_speed_plot()
@@ -129,13 +232,82 @@ class VehicleRendererApp(QWidget):
         self._w_init_plt_encoders()
         self._w_init_layout()
 
-        self.show()
+        self.showNormal()
         self.window_init_finished.emit()
+
+    def _w_init_layout(self):
+        imu_layout = QHBoxLayout()
+        imu_layout.addWidget(self.imu_plot)
+        imu_layout.addWidget(self.map_plot)
+
+        encoders_layout = QHBoxLayout()
+        encoders_layout.addWidget(self.plt_encoders)
+        encoders_layout.addWidget(QLabel("Placeholder for Right Encoder Plot"))
+
+        left_layout = QVBoxLayout()
+        left_layout.addLayout(imu_layout)
+        left_layout.addLayout(encoders_layout)
+
+        middle_layout = QGridLayout()
+        middle_layout.addWidget(self.rgb_label)
+        middle_layout.addWidget(self.depth_label)
+
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.speed_plot)
+        right_layout.addWidget(self.steering_plot)
+
+        # Create the main horizontal layout
+        main_layout = QHBoxLayout()
+        main_layout.addLayout(left_layout)
+        main_layout.addLayout(middle_layout)
+        main_layout.addLayout(right_layout)
+
+        central_widget = QWidget()
+        central_widget.setObjectName("central")
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
+        self.setStyleSheet(
+            """
+            background-color: #2d2a2e;
+            """
+        )
 
     def _w_init_main_window(self):
         self.setWindowTitle("ToySim UI")
+        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
         # self.setWindowFlags(Qt.FramelessWindowHint)
         self._drag_pos = None
+
+    def _w_init_toolbar(self):
+        def start_recording():
+            self.centralWidget().setStyleSheet("QWidget#central { border: 3px solid red; } ")
+            record_action.setIcon(QIcon(icon_path("stop")))
+            self.sig_toggle_record.emit(True)
+
+        def stop_recording():
+            self.centralWidget().setStyleSheet("")
+            record_action.setIcon(QIcon(icon_path("record")))
+            self.sig_toggle_record.emit(False)
+
+        def toggle_record(checked: bool):
+            if checked:
+                start_recording()
+            else:
+                stop_recording()
+
+        toolbar = QToolBar("Main")
+        self.addToolBar(Qt.TopToolBarArea, toolbar)
+        record_action = QAction(QIcon(icon_path("record")), "Record", self)
+        record_action.setCheckable(True)
+        record_action.setChecked(False)
+        record_action.setShortcut("Ctrl+R")
+
+        record_action.triggered.connect(toggle_record)
+        toolbar.addAction(record_action)
+
+    def _save_frame(self, frame):
+        if self.recording and self.video_writer:
+            self.video_writer.write(frame)
 
     def _w_init_camera_raw(self):
         self.rgb_label = QLabel(self)
@@ -302,36 +474,6 @@ class VehicleRendererApp(QWidget):
         self.plt_encoders.addItem(self.plt_encoders_left_curve)
         self.plt_encoders.addItem(self.plt_encoders_right_curve)
 
-    def _w_init_layout(self):
-        imu_layout = QHBoxLayout()
-        imu_layout.addWidget(self.imu_plot)
-        imu_layout.addWidget(self.map_plot)
-
-        encoders_layout = QHBoxLayout()
-        encoders_layout.addWidget(self.plt_encoders)
-        encoders_layout.addWidget(QLabel("Placeholder for Right Encoder Plot"))
-
-        left_layout = QVBoxLayout()
-        left_layout.addLayout(imu_layout)
-        left_layout.addLayout(encoders_layout)
-
-        middle_layout = QGridLayout()
-        middle_layout.addWidget(self.rgb_label)
-        middle_layout.addWidget(self.depth_label)
-
-        right_layout = QVBoxLayout()
-        right_layout.addWidget(self.speed_plot)
-        right_layout.addWidget(self.steering_plot)
-
-        # Create the main horizontal layout
-        main_layout = QHBoxLayout()
-        main_layout.addLayout(left_layout)
-        main_layout.addLayout(middle_layout)
-        main_layout.addLayout(right_layout)
-
-        self.setLayout(main_layout)
-        self.setStyleSheet("background-color: #2d2a2e;")
-
     def update_orientation_lines(self, x, y, yaw):
         length = 20  # Length of the orientation lines
         dx = length * np.cos(np.radians(yaw))
@@ -446,49 +588,59 @@ class VehicleRendererApp(QWidget):
             [p[0] for p in self.plt_encoders_left_data], [p[1] for p in self.plt_encoders_left_data]
         )
         self.plt_encoders_right_scatter.setData(
-            [p[0] for p in self.plt_encoders_right_data], [p[1] for p in self.plt_encoders_right_data]
+            [p[0] for p in self.plt_encoders_right_data],
+            [p[1] for p in self.plt_encoders_right_data],
         )
         self.plt_encoders_right_curve.setData(
-            [p[0] for p in self.plt_encoders_right_data], [p[1] for p in self.plt_encoders_right_data]
+            [p[0] for p in self.plt_encoders_right_data],
+            [p[1] for p in self.plt_encoders_right_data],
         )
 
 
 class Renderer:
     def __init__(
-        self,
-        q_image: SPMCQueue,
-        q_sensor: SPMCQueue,
-        q_remote: SPMCQueue,
+        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue, q_simulation: SPMCQueue
     ):
         self._q_image = q_image
         self._q_sensor = q_sensor
         self._q_remote = q_remote
+        self._q_simulation = q_simulation
 
     def run(self):
         app = QApplication(sys.argv)
-        app.aboutToQuit.connect(self._stop_thread_and_wait)
 
-        ex: QWidget = VehicleRendererApp()
+        ex: QMainWindow = VehicleRendererApp()
 
         self._t_ui_setup = RendererUISetup(
-            q_image=self._q_image, q_sensor=self._q_sensor, q_remote=self._q_remote
+            q_image=self._q_image,
+            q_sensor=self._q_sensor,
+            q_remote=self._q_remote,
+            q_simulation=self._q_simulation,
         )
         self._t_ui_setup.ui_setup_data_ready.connect(ex.init_window)
         self._t_ui_setup.start()
 
-        self._t_image_data = RendererImageData(q_image=self._q_image)
-        self._t_image_data.image_data_ready.connect(ex.update_image_data)
-        # self._t_image_data.finished.connect(app.exit)
+        self._t_image_data = RendererImageData(
+            q_image=self._q_image, q_simulation=self._q_simulation
+        )
+        self._t_image_data.sig_image_data.connect(ex.update_image_data)
         ex.window_init_finished.connect(self._t_image_data.start)
 
         self._t_sensor_data = RendererSensorData(q_sensor=self._q_sensor)
-        self._t_sensor_data.sensor_data_ready.connect(ex.update_sensor_data)
-        self._t_sensor_data.start()
+        self._t_sensor_data.sig_sensor_data.connect(ex.update_sensor_data)
+        ex.window_init_finished.connect(self._t_sensor_data.start)
 
+        self._t_rec = RecordingThread(q_simulation=self._q_simulation)
+        ex.sig_toggle_record.connect(self._t_rec.toggle)
+        self._t_rec.start()
+
+        app.aboutToQuit.connect(self._stop_thread_and_wait)
         return app.exec()
 
     def _stop_thread_and_wait(self):
         self._t_image_data.stop()
         self._t_sensor_data.stop()
+        self._t_rec.stop()
         self._t_image_data.wait()
         self._t_sensor_data.wait()
+        self._t_rec.wait()

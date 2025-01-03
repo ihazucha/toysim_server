@@ -1,6 +1,33 @@
 import struct
-from typing import Type
 import numpy as np
+import os
+
+from typing import Type, Any
+
+
+# -------------------------------------------------------------------------------------------------
+
+CWD = os.path.dirname(__file__)
+PATH_DATA = os.path.join(CWD, "../../data")
+PATH_RECORDS = os.path.join(PATH_DATA, "records/")
+PATH_STATIC = os.path.join(PATH_DATA, "static/")
+
+
+def icon_path(name: str):
+    return os.path.join(PATH_STATIC, f"{name}.png")
+
+
+def record_path(name: str):
+    return os.path.join(PATH_RECORDS, f"{name}.tsr")
+
+def last_record_path():
+    records = os.listdir(PATH_RECORDS)
+    records.sort(reverse=True)
+    if records:
+        return os.path.join(PATH_RECORDS, records[0])
+    return None
+
+# -------------------------------------------------------------------------------------------------
 
 
 class SerializableMeta(type):
@@ -85,6 +112,9 @@ class Position(SerializablePrimitive):
     def __init__(self, x: float, y: float, z: float):
         self.x, self.y, self.z = x, y, z
 
+    def __str__(self):
+        return f"(x, y, z): ({self.x:.3f}, {self.y:.3f}, {self.z:.3f})"
+
     def to_list(self):
         return [self.x, self.y, self.z]
 
@@ -95,6 +125,9 @@ class Rotation(SerializablePrimitive):
 
     def __init__(self, roll: float, pitch: float, yaw: float):
         self.roll, self.pitch, self.yaw = roll, pitch, yaw
+
+    def __str__(self):
+        return f"(r, p, y): ({self.roll:.3f}, {self.pitch:.3f}, {self.yaw:.3f})"
 
     def to_list(self):
         return [self.roll, self.pitch, self.yaw]
@@ -107,6 +140,9 @@ class Pose(SerializableComplex):
     def __init__(self, position: Position, rotation: Rotation):
         self.position = position
         self.rotation = rotation
+
+    def __str__(self):
+        return f"{self.position} {self.rotation}"
 
     def to_list(self):
         return [self.position, self.rotation]
@@ -257,3 +293,119 @@ class RemoteControlData(SerializablePrimitive):
 
     def to_list(self):
         return [self.timestamp, self.set_speed, self.set_steering_angle]
+
+
+# -------------------------------------------------------------------------------------------------
+
+
+class SimCameraData:
+    FORMAT = "=4Q"
+    W = 640
+    H = 480
+    RGB_IMAGE_SIZE = W * H * 3
+    DEPTH_IMAGE_SIZE = W * H * 2
+    SIZE = struct.calcsize(FORMAT) + RGB_IMAGE_SIZE + DEPTH_IMAGE_SIZE
+
+    def __init__(
+        self,
+        rgb_image: np.ndarray[Any, np.dtype[np.uint8]],
+        depth_image: np.ndarray[Any, np.dtype[np.float16]],
+        render_enqueued_unix_timestamp: int,
+        render_finished_unix_timestamp: int,
+        game_frame_number: int,
+        render_frame_number: int,
+    ):
+        self.render_enqueued_unix_timestamp = render_enqueued_unix_timestamp
+        self.render_finished_unix_timestamp = render_finished_unix_timestamp
+        self.game_frame_number = game_frame_number
+        self.render_frame_number = render_frame_number
+        self.depth_image = depth_image
+        self.rgb_image = rgb_image
+
+    def to_bytes(self):
+        # TODO: switch order of operations to avoid large array copy
+        b = self.rgb_image.tobytes()
+        b += self.depth_image.tobytes()
+        b += struct.pack(
+            SimCameraData.FORMAT,
+            self.render_enqueued_unix_timestamp,
+            self.render_finished_unix_timestamp,
+            self.game_frame_number,
+            self.render_frame_number,
+        )
+        return b
+
+
+    def from_bytes(data: bytes) -> "SimCameraData":
+        data_start = 0
+        data_end = SimCameraData.RGB_IMAGE_SIZE
+        rgb_image_array = np.frombuffer(data[:data_end], dtype=np.uint8)
+        rgb_image_array = rgb_image_array.reshape((SimCameraData.H, SimCameraData.W, 3))
+
+        data_start = data_end
+        data_end += SimCameraData.DEPTH_IMAGE_SIZE
+        depth_image_array = np.frombuffer(data[data_start:data_end], dtype=np.float16)
+        depth_image_array = depth_image_array.reshape((SimCameraData.H, SimCameraData.W))
+
+        data_start = data_end
+        return SimCameraData(
+            rgb_image_array,
+            depth_image_array,
+            *struct.unpack(SimCameraData.FORMAT, data[data_start:]),
+        )
+
+
+class SimVehicleData:
+    FORMAT = "=2f"
+    SIZE = struct.calcsize(FORMAT) + Pose.SIZE
+
+    def __init__(self, speed: float, steering_angle: float, pose: Pose):
+        self.speed = speed
+        self.steering_angle = steering_angle
+        self.pose = pose
+
+    def __str__(self):
+        return f"sped: {self.speed}, stra: {self.steering_angle}, pose: {self.pose}"
+
+    def to_bytes(self):
+        b = struct.pack(SimVehicleData.FORMAT, self.speed, self.steering_angle)
+        b += self.pose.to_bytes()
+        return b
+
+    @staticmethod
+    def from_bytes(data: bytes) -> "SimVehicleData":
+        speed_and_steering_size = struct.calcsize(SimVehicleData.FORMAT)
+        speed, steering_angle = struct.unpack(SimVehicleData.FORMAT, data[:speed_and_steering_size])
+        pose = Pose.from_bytes(data[speed_and_steering_size:])
+        return SimVehicleData(speed, steering_angle, pose)
+
+
+class SimData:
+    FORMAT = "f"
+    FORMAT_SIZE = struct.calcsize(FORMAT)
+    SIZE = SimCameraData.SIZE + SimVehicleData.SIZE + FORMAT_SIZE
+
+    def __init__(self, camera_data: SimCameraData, vehicle_data: SimVehicleData, dt: float):
+        self.camera_data = camera_data
+        self.vehicle_data = vehicle_data
+        self.dt = dt
+
+    def to_bytes(self):
+        b = self.camera_data.to_bytes()
+        b += self.vehicle_data.to_bytes()
+        b += struct.pack(SimData.FORMAT, self.dt)
+        return b
+
+    @staticmethod
+    def from_bytes(data: bytes) -> "SimData":
+        data_memory_view = memoryview(data)
+        data_start = 0
+        data_end = SimCameraData.SIZE
+        camera_data = SimCameraData.from_bytes(data_memory_view[:data_end])
+        data_start = data_end
+        data_end += SimVehicleData.SIZE
+        vehicle_data = SimVehicleData.from_bytes(data_memory_view[data_start:data_end])
+        data_start = data_end
+        data_end += struct.calcsize(SimData.FORMAT)
+        dt = struct.unpack(SimData.FORMAT, data_memory_view[data_start:data_end])
+        return SimData(camera_data, vehicle_data, dt)

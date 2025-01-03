@@ -3,12 +3,12 @@ import math
 import socket
 
 from multiprocessing import Process
-from threading import Thread
+from threading import Thread, Event
 from typing import Tuple
 
 from utils.ipc import SPMCQueue
 from utils.image import jpg_encode
-from utils.data import JPGImageData, RawImageData, SensorData
+from utils.data import JPGImageData, RawImageData, RemoteControlData, SensorData, SimData
 
 MAX_DGRAM_SIZE = 2**16
 
@@ -157,6 +157,101 @@ class RemoteDataReceiver(Thread):
             while True:
                 data = sock.recv(MAX_DGRAM_SIZE)
                 q.put(data)
+
+
+# --------------------
+
+
+class TcpServer(Process):
+    def __init__(self, q_recv: SPMCQueue, q_send: SPMCQueue, server_ip: str):
+        super().__init__()
+        self._q_recv = q_recv
+        self._q_send = q_send
+        self._sock = self._bind_listen((server_ip, 8888))
+
+    def _log(self, msg: str):
+        print(f"[{self.__class__.__name__}] {msg}")
+
+    def _bind_listen(self, addr: tuple):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(addr)
+        sock.listen()
+        self._log(f"Active on: {addr}")
+        return sock
+
+    def run(self):
+        while True:
+            self._log(f"Waiting for connection...")
+            sock, addr = self._sock.accept()
+            self._log(f"Connected: {addr}")
+            connection = TcpConnection(sock, self._q_recv, self._q_send)
+            connection.receive_loop()
+            del connection
+            self._log(f"Disconnected: {addr}")
+
+
+class TcpConnection:
+    def __init__(self, socket: socket, q_recv: SPMCQueue, q_send: SPMCQueue):
+        self._socket = socket
+        self._q_recv = q_recv
+        self._q_send = q_send
+
+    def __del__(self):
+        self._close()
+
+    def _log(self, msg: str, who: str = "[Connection]"):
+        print(f"{who} {msg}")
+
+    def _close(self):
+        if self._socket is None:
+            return
+        try:
+            self._log(f"Closing cocket...")
+            self._socket.shutdown(socket.SHUT_RDWR)
+            self._socket.close()
+            self._log(f"Socket closed")
+        except OSError as e:
+            self._log(f"Error while closing socket: {e}")
+            pass
+
+    def _recv_data(self, size):
+        data = b""
+        while len(data) < size:
+            more = self._socket.recv(size - len(data))
+            if not more:
+                raise IOError("Socket closed before all data received")
+            data += more
+        return data
+
+    def receive_loop(self):
+        def send(exit_event: Event):
+            q = self._q_send.get_consumer()
+            while not exit_event.is_set():
+                try:
+                    data: RemoteControlData = q.get()
+                    self._socket.sendall(data.to_bytes())
+                except OSError:
+                    exit_event.set()
+                    self._log("Send failed - connection closed by client")
+                    break
+
+        def recv(exit_event: Event):
+            q = self._q_recv.get_producer()
+            while not exit_event.is_set():
+                try:
+                    data = self._recv_data(SimData.SIZE)
+                    q.put(data)
+                except OSError:
+                    self._log("Recv failed - connection closed by client")
+                    exit_event.set()
+                    break
+
+        exit_event = Event()
+        t_recv = Thread(target=recv, args=[exit_event], daemon=True)
+        t_send = Thread(target=send, args=[exit_event], daemon=True)
+        ts = [t_recv, t_send]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
 
 
 # --------------------
