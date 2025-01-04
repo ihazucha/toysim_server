@@ -53,29 +53,90 @@ def hsv_thresh(hsv):
     return output
 
 def red_mask_thresh(hsv):
-    # lower mask (0-10)
+    # Red in HSV space is depicted by Hue around 360 deg
+    # which is around 179 (max value in OpenCV)
+    
     lower_red = np.array([0,50,50])
     upper_red = np.array([7,255,255])
     mask0 = cv2.inRange(hsv, lower_red, upper_red)
 
-    # upper mask (170-180)
     lower_red = np.array([172,50,50])
     upper_red = np.array([179,255,255])
     mask1 = cv2.inRange(hsv, lower_red, upper_red)
-
-    # join my masks
+    
     mask = mask0 + mask1
-
-    # set my output img to zero everywhere except my mask
     result = cv2.bitwise_and(hsv, hsv, mask=mask) 
-    # result[np.where(mask == 0)] = 0
+
     return result
+
+def get_marker_contours(bgr):
+    # Convert the filtered image to grayscale
+    gray = cv2.cvtColor(red_bgr, cv2.COLOR_BGR2GRAY)
+    # Find contours in the grayscale image
+    contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    MIN_CONTOUR_AREA = 10
+    contours = [contour for contour in contours if cv2.contourArea(contour) > MIN_CONTOUR_AREA]
+    return contours
+
+def get_contour_centers(contours):
+    contour_centers = []
+    for contour in contours:
+        M = cv2.moments(contour)
+        if M["m00"] != 0:
+            cX = int(M["m10"] / M["m00"])
+            cY = int(M["m01"] / M["m00"])
+            contour_centers.append((cX, cY))
+    return contour_centers
+
+def draw_poly_curve(img, contour_centers):
+    if len(contour_centers) > 1:
+        # Fit a polynomial through the contour centers
+        contour_centers_np = np.array(contour_centers, dtype=np.float32)
+        x = contour_centers_np[:, 0]
+        y = contour_centers_np[:, 1]
+        poly_coeff = np.polyfit(x, y, 2)  # Fit a 2nd degree polynomial
+        poly = np.poly1d(poly_coeff)
+
+        # Generate points along the polynomial curve
+        x_new = np.linspace(x.min(), x.max(), 100)
+        y_new = poly(x_new)
+
+        # Draw the polynomial curve
+        for i in range(len(x_new) - 2):
+            cv2.line(img, (int(x_new[i]), int(y_new[i])), (int(x_new[i+1]), int(y_new[i+1])), (0, 255, 0), 2)
+
+
+def draw_contour_centers(img, countour_centers):
+    for cc in countour_centers:
+        cv2.circle(img, cc, 5, (0, 255, 0), -1)
+
+def project_to_ground_plane(points, homography_matrix):
+    # Apply homography to project points to the ground plane
+    points_homogeneous = np.hstack((points, np.ones((points.shape[0], 1))))
+    ground_points_homogeneous = points_homogeneous @ homography_matrix.T
+    ground_points = ground_points_homogeneous[:, :2] / ground_points_homogeneous[:, 2][:, np.newaxis]
+    return ground_points
+
+def project_to_image_plane(points, homography_matrix):
+    # Apply inverse homography to project points back to the image plane
+    homography_matrix_inv = np.linalg.inv(homography_matrix)
+    points_homogeneous = np.hstack((points, np.ones((points.shape[0], 1))))
+    image_points_homogeneous = points_homogeneous @ homography_matrix_inv.T
+    image_points = image_points_homogeneous[:, :2] / image_points_homogeneous[:, 2][:, np.newaxis]
+    return image_points
+
 
 if __name__ == "__main__":
     data = get_data()
 
     cv2.namedWindow("image")
-    hsv_thresh_sliders()
+
+    # Define the homography matrix (example values, should be calibrated for your setup)
+    homography_matrix = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0]
+    ])
 
     try:
         while True:
@@ -86,54 +147,40 @@ if __name__ == "__main__":
                 bgr = cv2.cvtColor(d.camera_data.rgb_image, cv2.COLOR_RGB2BGR)
                 hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
 
-                # red_filtered = hsv_thresh()
-                red_filtered = cv2.cvtColor(red_mask_thresh(hsv), cv2.COLOR_HSV2BGR)
+                red_hsv = red_mask_thresh(hsv)
+                red_bgr = cv2.cvtColor(red_hsv, cv2.COLOR_HSV2BGR)
 
-                # Convert the filtered image to grayscale
-                gray = cv2.cvtColor(red_filtered, cv2.COLOR_BGR2GRAY)
-                
-                # Find contours in the grayscale image
-                contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                # Filter out small contours by area
-                min_contour_area = 10 # You can adjust this threshold
-                contours = [contour for contour in contours if cv2.contourArea(contour) > min_contour_area]
-                
-                # Loop over the contours
-                for contour in contours:
-                    # Get the moments to calculate the center of the contour
-                    M = cv2.moments(contour)
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                        # Draw a green circle at the center
-                        cv2.circle(red_filtered, (cX, cY), 5, (0, 255, 0), -1)
-
-                # Collect contour centers
-                contour_centers = []
-                for contour in contours:
-                    M = cv2.moments(contour)
-                    if M["m00"] != 0:
-                        cX = int(M["m10"] / M["m00"])
-                        cY = int(M["m01"] / M["m00"])
-                        contour_centers.append((cX, cY))
+                contours = get_marker_contours(red_bgr)
+                contour_centers = get_contour_centers(contours)
+                draw_contour_centers(red_bgr, contour_centers)
 
                 if len(contour_centers) > 1:
-                    # Fit a polynomial through the contour centers
-                    contour_centers = np.array(contour_centers, dtype=np.float32)
-                    x = contour_centers[:, 0]
-                    y = contour_centers[:, 1]
-                    poly_coeff = np.polyfit(x, y, 2)  # Fit a 2nd degree polynomial
+                    # Project contour centers to the ground plane
+                    contour_centers_np = np.array(contour_centers, dtype=np.float32)
+                    ground_points = project_to_ground_plane(contour_centers_np, homography_matrix)
+                    for point in ground_points:
+                        cv2.circle(red_bgr, (int(point[0]), int(point[1])), 5, (255, 0, 0), -1)
+
+                    # Fit a polynomial through the ground points
+                    x_ground = ground_points[:, 0]
+                    y_ground = ground_points[:, 1]
+                    poly_coeff = np.polyfit(x_ground, y_ground, 2)  # Fit a 2nd degree polynomial
                     poly = np.poly1d(poly_coeff)
 
-                    # Generate points along the polynomial curve
-                    x_new = np.linspace(x.min(), x.max(), 100)
-                    y_new = poly(x_new)
+                    # Generate points along the polynomial curve in ground plane
+                    x_new_ground = np.linspace(x_ground.min(), x_ground.max(), 100)
+                    y_new_ground = poly(x_new_ground)
+                    ground_poly_points = np.vstack((x_new_ground, y_new_ground)).T
 
-                    # Draw the polynomial curve
-                    for i in range(len(x_new) - 1):
-                        cv2.line(red_filtered, (int(x_new[i]), int(y_new[i])), (int(x_new[i+1]), int(y_new[i+1])), (0, 255, 0), 2)
+                    # Project polynomial points back to the image plane
+                    image_poly_points = project_to_image_plane(ground_poly_points, homography_matrix)
 
-                cv2.imshow('image', red_filtered)
+                    # Draw the polynomial curve in the image
+                    for i in range(len(image_poly_points) - 1):
+                        cv2.line(red_bgr, (int(image_poly_points[i][0]), int(image_poly_points[i][1])), 
+                                 (int(image_poly_points[i+1][0]), int(image_poly_points[i+1][1])), (0, 255, 0), 2)
+
+                cv2.imshow('image', red_bgr)
                 if cv2.waitKey(33) & 0xFF == ord('q'):
                     break
 
