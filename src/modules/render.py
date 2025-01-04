@@ -1,22 +1,9 @@
 import sys
-import time
-import cv2
-import os
-import numpy as np
 
-from collections import deque
-from typing import Any
-
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import (
-    QImage,
     QPixmap,
-    QColor,
-    QBrush,
-    QLinearGradient,
-    QVector3D,
     QIcon,
-    QAction,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,231 +11,66 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
+    QSpacerItem,
     QLabel,
     QWidget,
-    QToolBar,
-    QListWidget,
-    QDockWidget
+    QSizePolicy
 )
-import pyqtgraph as pg
-import pyqtgraph.opengl as gl
 
+from modules.ui.plots import (
+    EncodersPlotWidget,
+    IMUPlotWidget,
+    MapPlotWidget,
+    SpeedPlotWidget,
+    SteeringPlotWidget,
+)
 
-from utils.data import PATH_RECORDS, JPGImageData, SimData, icon_path, record_path
+from utils.data import icon_path
 from utils.ipc import SPMCQueue
-from utils.env import ENV, Environment
-from modules.recorder import RecordWriter
+
+from modules.ui.sidebar import RecordSidebar
+from modules.ui.recorder import RecordingThread
+from modules.ui.toolbar import TopToolBar
+from modules.ui.data import ImageDataThread, SensorDataThread
 
 
-FPS = 60
-DTIME = 1 / FPS
-DATA_QUEUE_LENGTH_SECONDS = 5
-DATA_QUEUE_SIZE = FPS * DATA_QUEUE_LENGTH_SECONDS
-
-PLOT_QUEUE_DEFAULT_DATA = list([0 for _ in range(DATA_QUEUE_SIZE)])
-PLOT_TIME_STEPS = np.arange(-DATA_QUEUE_SIZE, 0, 1)
-STEP_MAJOR_TICKS = list(
-    zip(
-        range(-DATA_QUEUE_SIZE, 1, FPS),
-        map(str, range(-DATA_QUEUE_SIZE, 1, FPS)),
-    )
-)
-STEP_MINOR_TICKS = list(
-    zip(
-        range(-DATA_QUEUE_SIZE, 1, FPS // 2),
-        ["" for _ in range(DATA_QUEUE_SIZE // 2)],
-    )
-)
-STEP_TICKS = [STEP_MAJOR_TICKS, STEP_MINOR_TICKS]
-
-# Contrast control (1.0-3.0)
-ALPHA = 3
-# Brightness control (0-100)
-BETA = 10
-
-RAW2DEG = 360 / 4096
-
-
-class RendererUISetup(QThread):
-    ui_setup_data_ready = Signal(tuple)
-
-    def __init__(
-        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue, q_simulation: SPMCQueue
-    ):
-        super().__init__()
-        self._q_image = q_image
-        self._q_sensor = q_sensor
-        self._q_remote = q_remote
-        self._q_simulation = q_simulation
-
-    def run(self):
-        setup_data: tuple | None = None
-        if ENV == Environment.VEHICLE:
-            q_image = self._q_image.get_consumer()
-            jpg_image_data: JPGImageData = q_image.get()
-            image_array = cv2.imdecode(
-                np.frombuffer(jpg_image_data.jpg, np.uint8), cv2.IMREAD_COLOR
-            )
-            height, width, _ = image_array.shape
-            setup_data = (width, height)
-        elif ENV == Environment.SIM:
-            q_simulation = self._q_simulation.get_consumer()
-            sim_data_bytes = q_simulation.get()
-            sim_data: SimData = SimData.from_bytes(sim_data_bytes)
-            height, width, _ = sim_data.camera_data.rgb_image.shape
-            setup_data = (width, height)
-        else:
-            raise NotImplementedError()
-        self.ui_setup_data_ready.emit(setup_data)
-
-
-class RecordingThread(QThread):
-    def __init__(self, q_simulation: SPMCQueue):
-        super().__init__()
-        self._is_recording = False
-        self._record_writer = RecordWriter(q_simulation)
-
-    def run(self):
-        while True:
-            if not self._is_recording:
-                time.sleep(0.1)
-            else:
-                path = record_path(str(time.time_ns()))
-                self._record_writer.write_new(record_path=path)
-
-    def toggle(self, is_recording: bool):
-        if not is_recording:
-            self._record_writer.stop()
-        self._is_recording = is_recording
-
-class RecordSidebar(QDockWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Record Sidebar")
-        self.setFixedWidth(200)
-        widget = QWidget()
-        self.layout = QVBoxLayout(widget)
-        widget.setLayout(self.layout)
-        self.record_list = QListWidget(widget)
-        self.layout.addWidget(self.record_list)
-        self.load_records()
-        self.setWidget(widget)
-
-    def load_records(self):
-        records = os.listdir(PATH_RECORDS)
-        for record in records:
-            self.record_list.addItem(record)
-
-    def add_record(self, record_name):
-        self.record_list.addItem(record_name)
-
-
-class RendererImageData(QThread):
-    sig_image_data = Signal(tuple)
-
-    def __init__(self, q_image: SPMCQueue, q_simulation: SPMCQueue):
-        super().__init__()
-        self._q_image = q_image
-        self._q_simulation = q_simulation
-        self._is_running = True
-
-    def run(self):
-        if ENV == Environment.VEHICLE:
-            self._run_vehicle()
-        elif ENV == Environment.SIM:
-            self._run_sim()
-        else:
-            raise NotImplementedError()
-
-    def _run_vehicle(self):
-        q = self._q_image.get_consumer()
-        while self._is_running:
-            jpg_image_data: JPGImageData = q.get()
-            self.sig_image_data.emit(
-                (RendererImageData.jpg2qimage(jpg_image_data.jpg), jpg_image_data.timestamp)
-            )
-
-    def _run_sim(self):
-        q = self._q_simulation.get_consumer()
-        while self._is_running:
-            sim_data_bytes = q.get()
-            sim_data: SimData = SimData.from_bytes(sim_data_bytes)
-            qimage = RendererImageData.array2image(sim_data.camera_data.rgb_image)
-            self.sig_image_data.emit((qimage, sim_data.camera_data.render_enqueued_unix_timestamp))
-
-    @staticmethod
-    def array2image(arr: np.ndarray[Any, np.dtype[np.uint8]]):
-        height, width, channel = arr.shape
-        bytes_per_line = channel * width
-        return QImage(arr.data, width, height, bytes_per_line, QImage.Format_RGB888)
-
-    @staticmethod
-    def jpg2qimage(jpg):
-        image_array = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-        return RendererImageData.array2image(image_array)
-
-    def stop(self):
-        self._is_running = False
-
-
-class RendererSensorData(QThread):
-    sig_sensor_data = Signal(tuple)
-
-    def __init__(self, q_sensor: SPMCQueue):
-        super().__init__()
-        self._q_sensor = q_sensor
-        self._is_running = True
-
-    def run(self):
-        q_sensor = self._q_sensor.get_consumer()
-        while self._is_running:
-            data = q_sensor.get()
-            self.sig_sensor_data.emit(data)
-
-    def stop(self):
-        self._is_running = False
-
-
-class VehicleRendererApp(QMainWindow):
-    window_init_finished = Signal()
-    sig_toggle_record = Signal(bool)
+class RendererMainWindow(QMainWindow):
+    init_complete = Signal()
 
     def __init__(self):
         super().__init__()
-        self.record_sidebar = RecordSidebar(self)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.record_sidebar)
 
-    def init_window(self, data):
-        self._cam_width, self._cam_height = data
+    def init(self):
+        self._init_main_window()
+        self._init_sidebar()
+        self._init_camera_rgb()
+        self._init_camera_depth()
+        self._init_speed_plot()
+        self._init_steering_plot()
+        self._init_map_plot()
+        self._init_imu_plot()
+        self._init_plt_encoders()
 
-        self._w_init_main_window()
-        self._w_init_toolbar()
-        self._w_init_camera_raw()
-        self._w_init_camera_depth()
-        self._w_init_speed_plot()
-        self._w_init_steering_plot()
-        self._w_init_map_plot()
-        self._w_init_imu_plot()
-        self._w_init_plt_encoders()
-        self._w_init_layout()
+        self._init_layout()
+        self._init_top_toolbar()
 
         self.showNormal()
-        self.window_init_finished.emit()
+        self.init_complete.emit()
 
-    def _w_init_layout(self):
-        imu_layout = QHBoxLayout()
-        imu_layout.addWidget(self.imu_plot)
-        imu_layout.addWidget(self.map_plot)
+    def _init_layout(self):
+        imu_layout = QVBoxLayout()
+        imu_layout.addWidget(self.map_plot, stretch=1)
+        imu_layout.addWidget(self.imu_plot, stretch=1)
 
-        encoders_layout = QHBoxLayout()
+        encoders_layout = QVBoxLayout()
         encoders_layout.addWidget(self.plt_encoders)
-        encoders_layout.addWidget(QLabel("Placeholder for Right Encoder Plot"))
+        encoders_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
-        left_layout = QVBoxLayout()
+        left_layout = QHBoxLayout()
         left_layout.addLayout(imu_layout)
-        left_layout.addLayout(encoders_layout)
+        # left_layout.addLayout(encoders_layout)
 
-        middle_layout = QGridLayout()
+        middle_layout = QVBoxLayout()
         middle_layout.addWidget(self.rgb_label)
         middle_layout.addWidget(self.depth_label)
 
@@ -256,7 +78,6 @@ class VehicleRendererApp(QMainWindow):
         right_layout.addWidget(self.speed_plot)
         right_layout.addWidget(self.steering_plot)
 
-        # Create the main horizontal layout
         main_layout = QHBoxLayout()
         main_layout.addLayout(left_layout)
         main_layout.addLayout(middle_layout)
@@ -272,218 +93,42 @@ class VehicleRendererApp(QMainWindow):
             """
         )
 
-    def _w_init_main_window(self):
+    def _init_main_window(self):
         self.setWindowTitle("ToySim UI")
         self.setWindowIcon(QIcon(icon_path("toysim_icon")))
-        # self.setWindowFlags(Qt.FramelessWindowHint)
-        self._drag_pos = None
 
-    def _w_init_toolbar(self):
-        def start_recording():
-            self.centralWidget().setStyleSheet("QWidget#central { border: 3px solid red; } ")
-            record_action.setIcon(QIcon(icon_path("stop")))
-            self.sig_toggle_record.emit(True)
+    def _init_top_toolbar(self):
+        self.top_tool_bar = TopToolBar(parent=self.centralWidget())
+        self.addToolBar(Qt.TopToolBarArea, self.top_tool_bar)
 
-        def stop_recording():
-            self.centralWidget().setStyleSheet("")
-            record_action.setIcon(QIcon(icon_path("record")))
-            self.sig_toggle_record.emit(False)
+    def _init_sidebar(self):
+        self.record_sidebar = RecordSidebar(self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.record_sidebar)
 
-        def toggle_record(checked: bool):
-            if checked:
-                start_recording()
-            else:
-                stop_recording()
-
-        toolbar = QToolBar("Main")
-        self.addToolBar(Qt.TopToolBarArea, toolbar)
-        record_action = QAction(QIcon(icon_path("record")), "Record", self)
-        record_action.setCheckable(True)
-        record_action.setChecked(False)
-        record_action.setShortcut("Ctrl+R")
-
-        record_action.triggered.connect(toggle_record)
-        toolbar.addAction(record_action)
-
-    def _save_frame(self, frame):
-        if self.recording and self.video_writer:
-            self.video_writer.write(frame)
-
-    def _w_init_camera_raw(self):
+    def _init_camera_rgb(self):
         self.rgb_label = QLabel(self)
-        self.rgb_label.setMinimumSize(self._cam_width, self._cam_height)
+        self.rgb_label.setMinimumSize(640, 480)
         self.rgb_pixmap = QPixmap()
 
-    def _w_init_camera_depth(self):
+    def _init_camera_depth(self):
         self.depth_label = QLabel(self)
-        # self.depth_label.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
+        self.depth_label.setMinimumSize(640, 480)
         self.depth_pixmap = QPixmap()
 
-    def _w_init_speed_plot(self):
-        self.speed_plot = pg.PlotWidget()
-        self.speed_plot.setXRange(-DATA_QUEUE_SIZE, 0)
-        self.speed_plot.setYRange(-200, 200)
-        self.speed_plot.getAxis("bottom").setTicks(STEP_TICKS)
-        self.speed_plot.getPlotItem().showGrid(x=True, y=True)
-        self.speed_plot.getPlotItem().setTitle("Speed")
-        self.speed_plot.getPlotItem().setLabel("left", "Speed [cm/s]")
-        self.speed_plot.getPlotItem().setLabel("bottom", f"Step [n] (s = {FPS} steps)")
-        self.speed_marker = pg.ScatterPlotItem(size=5, pen=pg.mkPen(None), brush="w")
-        self.speed_marker.setZValue(1)
-        self.speed_plot.addItem(self.speed_marker)
+    def _init_speed_plot(self):
+        self.speed_plot = SpeedPlotWidget()
 
-        self.speed_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        self.speed_setpoint_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
+    def _init_steering_plot(self):
+        self.steering_plot = SteeringPlotWidget()
 
-        self.speed_plot.getPlotItem().addLegend()
-        self.speed_plot_data = self.speed_plot.plot(
-            PLOT_TIME_STEPS,
-            self.speed_data,
-            pen=pg.mkPen(QColor(0, 255, 0, 255), style=Qt.SolidLine),
-            name="Value",
-        )
-        self.speed_setpoint_plot_data = self.speed_plot.plot(
-            PLOT_TIME_STEPS,
-            self.speed_setpoint_data,
-            pen=pg.mkPen(QColor(0, 255, 0, 64), style=Qt.DashLine),
-            name="Setpoint",
-        )
+    def _init_map_plot(self):
+        self.map_plot = MapPlotWidget()
 
-    def _w_init_steering_plot(self):
-        self.steering_plot = pg.PlotWidget()
-        # self.steering_plot.setMinimumSize(VehicleCamera.WIDTH, VehicleCamera.HEIGHT)
-        self.steering_plot.setXRange(-40, 40)
-        self.steering_plot.getAxis("left").setTicks(STEP_TICKS)
-        self.steering_plot.getPlotItem().showGrid(x=True, y=True)
-        self.steering_plot.getPlotItem().setTitle("Steering Angle")
-        self.steering_plot.getPlotItem().setLabel("left", f"Step [n] (s = {FPS} steps)")
-        self.steering_plot.getPlotItem().setLabel("bottom", "Steering angle [deg]")
-        self.steering_marker = pg.ScatterPlotItem(
-            size=5, pen=pg.mkPen(None), brush="w", name="Current"
-        )
-        self.steering_marker.setZValue(1)
-        self.steering_plot.addItem(self.steering_marker)
+    def _init_imu_plot(self):
+        self.imu_plot = IMUPlotWidget()
 
-        self.steering_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        self.steering_setpoint_data = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-
-        self.steering_plot.getPlotItem().addLegend()
-        self.steering_plot_data = self.steering_plot.plot(
-            self.steering_data,
-            PLOT_TIME_STEPS,
-            pen=pg.mkPen(QColor(255, 0, 0, 255), style=Qt.SolidLine),
-            name="Value",
-        )
-        self.steering_setpoint_plot_data = self.steering_plot.plot(
-            self.steering_setpoint_data,
-            PLOT_TIME_STEPS,
-            pen=pg.mkPen(QColor(255, 0, 0, 128), style=Qt.DashLine),
-            name="Setpoint",
-        )
-
-    def _w_init_map_plot(self):
-        self.map_plot = pg.PlotWidget()
-        self.map_plot.setXRange(-100, 100)  # Adjust the range as needed
-        self.map_plot.setYRange(-100, 100)  # Adjust the range as needed
-        self.map_plot.getPlotItem().showGrid(x=True, y=True)
-        self.map_plot.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
-        # self.arrow = pg.ArrowItem(angle=90, tipAngle=30, baseAngle=20, headLen=20, tailLen=10, headWidth=10, tailWidth=4, pen={'color': 'g', 'width': 2})
-        # self.map_plot.addItem(self.arrow)
-        # self.arrow.setZValue(1)
-        self.orientation_line1 = pg.PlotCurveItem(pen=pg.mkPen("r", width=2))
-        self.orientation_line1.setZValue(1)
-        self.orientation_line2 = pg.PlotCurveItem(pen=pg.mkPen("g", width=2))
-        self.orientation_line2.setZValue(1)
-        self.map_plot.addItem(self.orientation_line1)
-        self.map_plot.addItem(self.orientation_line2)
-
-        # Create a deque to store the past positions
-        self.map_plot_positions_x = deque(maxlen=DATA_QUEUE_SIZE)
-        self.map_plot_positions_y = deque(maxlen=DATA_QUEUE_SIZE)
-
-        # Create a PlotCurveItem to represent the path
-        self.path = pg.PlotCurveItem(
-            pen=pg.mkPen(QColor(255, 255, 255, 255), width=2, style=Qt.DashLine)
-        )
-        gradient = QLinearGradient(0, 0, 0, 1)
-        gradient.setColorAt(0, QColor(255, 255, 255, 255))
-        gradient.setColorAt(1, QColor(255, 255, 255, 64))
-        self.path.setBrush(QBrush(gradient))
-        self.map_plot.addItem(self.path)
-
-    def _w_init_imu_plot(self):
-        self.imu_plot = gl.GLViewWidget()  # Placeholder for the 3D plot
-        self.imu_plot.setSizePolicy(self.map_plot.sizePolicy())
-        self.imu_plot.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
-        self.imu_plot.setBackgroundColor("k")
-
-        # Create the arrows using GLLinePlotItem
-        self.arrow_x = gl.GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [1, 0, 0]]), color=(1, 0, 0, 1), width=3
-        )
-        self.arrow_y = gl.GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [0, 1, 0]]), color=(0, 1, 0, 1), width=3
-        )
-        self.arrow_z = gl.GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [0, 0, 1]]), color=(0, 0, 1, 1), width=3
-        )
-
-        # Add the arrows to the plot
-        self.imu_plot.addItem(self.arrow_x)
-        self.imu_plot.addItem(self.arrow_y)
-        self.imu_plot.addItem(self.arrow_z)
-
-        grid = gl.GLGridItem()
-        grid.setSize(x=10, y=10, z=10)
-        self.imu_plot.addItem(grid)
-
-        # Add axis labels using GLLinePlotItem
-        x_label = gl.GLLinePlotItem(
-            pos=np.array([[1, 0, 0], [1.1, 0, 0]]), color=(1, 0, 0, 1), width=3
-        )
-        y_label = gl.GLLinePlotItem(
-            pos=np.array([[0, 1, 0], [0, 1.1, 0]]), color=(0, 1, 0, 1), width=3
-        )
-        z_label = gl.GLLinePlotItem(
-            pos=np.array([[0, 0, 1], [0, 0, 1.1]]), color=(0, 0, 1, 1), width=3
-        )
-        self.imu_plot.addItem(x_label)
-        self.imu_plot.addItem(y_label)
-        self.imu_plot.addItem(z_label)
-
-    def _w_init_plt_encoders(self):
-        self.plt_encoders = pg.PlotWidget()
-        # self.right_encoder_plot = pg.PlotWidget()
-        self.plt_encoders.setAspectLocked()
-        self.plt_encoders.setXRange(-250, 250)
-        self.plt_encoders.setYRange(-250, 250)
-        self.plt_encoders.getPlotItem().showGrid(x=True, y=True)
-        self.plt_encoders.getPlotItem().setTitle("Encoders Data")
-        self.plt_encoders_left_data = deque(maxlen=150)
-        self.plt_encoders_right_data = deque(maxlen=150)
-        self.plt_encoders_left_scatter = pg.ScatterPlotItem(
-            size=5, pen=pg.mkPen(None), brush=pg.mkBrush(255, 0, 0, 120)
-        )
-        self.plt_encoders_right_scatter = pg.ScatterPlotItem(
-            size=5, pen=pg.mkPen(None), brush=pg.mkBrush(0, 255, 0, 120)
-        )
-        self.plt_encoders.addItem(self.plt_encoders_left_scatter)
-        self.plt_encoders.addItem(self.plt_encoders_right_scatter)
-        self.plt_encoders_left_curve = pg.PlotCurveItem(pen=pg.mkPen("r", width=1))
-        self.plt_encoders_right_curve = pg.PlotCurveItem(pen=pg.mkPen("g", width=1))
-        self.plt_encoders.addItem(self.plt_encoders_left_curve)
-        self.plt_encoders.addItem(self.plt_encoders_right_curve)
-
-    def update_orientation_lines(self, x, y, yaw):
-        length = 20  # Length of the orientation lines
-        dx = length * np.cos(np.radians(yaw))
-        dy = length * np.sin(np.radians(yaw))
-
-        # Line 1: From (x, y) to (x + dx, y + dy)
-        self.orientation_line1.setData([x, x + dx], [y, y + dy])
-
-        # Line 2: Perpendicular to Line 1
-        self.orientation_line2.setData([x, x - dy], [y, y + dx])
+    def _init_plt_encoders(self):
+        self.plt_encoders = EncodersPlotWidget()
 
     def update_image_data(self, data):
         qimage, timestamp = data
@@ -494,107 +139,7 @@ class VehicleRendererApp(QMainWindow):
         # self.depth_label.setPixmap(self.depth_pixmap)
 
     def update_sensor_data(self, data):
-        ...
-        # Plot speed
-        # speed_cm = vehicle_data.speed / 10
-        # self.speed_data.append(speed_cm)
-        # self.speed_plot_data.setData(PLOT_TIME_STEPS, self.speed_data)
-        # self.speed_marker.setData([PLOT_TIME_STEPS[-1]], [speed_cm])
-        # self.speed_setpoint_data.append(control_data.speed_setpoint)
-        # self.speed_setpoint_plot_data.setData(PLOT_TIME_STEPS, self.speed_setpoint_data)
-        # Plot steering
-        # self.steering_data.append(vehicle_data.steering_angle)
-        # self.steering_plot_data.setData(self.steering_data, PLOT_TIME_STEPS)
-        # self.steering_marker.setData([vehicle_data.steering_angle], [PLOT_TIME_STEPS[-1]])
-        # self.steering_setpoint_data.append(control_data.steering_angle_setpoint)
-        # self.steering_setpoint_plot_data.setData(self.steering_setpoint_data, PLOT_TIME_STEPS)
-        # Arrow
-        # self.arrow.setPos(vehicle_data.pose.position.y, vehicle_data.pose.position.x)
-        # self.arrow.setStyle(angle=vehicle_data.pose.rotation.yaw+90)
-        # Add the new position to the deque
-        # self.map_plot_positions_x.append(vehicle_data.pose.position.x)
-        # self.map_plot_positions_y.append(vehicle_data.pose.position.y)
-
-        # self.path.setData(list(self.map_plot_positions_x), list(self.map_plot_positions_y))
-
-        # self.update_imu_plot(vehicle_data.pose.rotation)
-        self._w_update_plt_encoders(data.rleft_encoder, data.rright_encoder)
-        # self.update_orientation_lines(
-        #     vehicle_data.pose.position.x,
-        #     vehicle_data.pose.position.y,
-        #     vehicle_data.pose.rotation.yaw,
-        # )
-
-    def update_imu_plot(self, rotation):
-        roll, pitch, yaw = (
-            np.deg2rad(rotation.roll),
-            np.deg2rad(rotation.pitch),
-            np.deg2rad(rotation.yaw),
-        )
-        # Create rotation matrices
-        Rx = np.array(
-            [
-                [1, 0, 0, 0],
-                [0, np.cos(roll), -np.sin(roll), 0],
-                [0, np.sin(roll), np.cos(roll), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-
-        Ry = np.array(
-            [
-                [np.cos(pitch), 0, np.sin(pitch), 0],
-                [0, 1, 0, 0],
-                [-np.sin(pitch), 0, np.cos(pitch), 0],
-                [0, 0, 0, 1],
-            ]
-        )
-
-        Rz = np.array(
-            [
-                [np.cos(yaw), -np.sin(yaw), 0, 0],
-                [np.sin(yaw), np.cos(yaw), 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]
-        )
-
-        # Combined rotation matrix
-        R = Rz @ Ry @ Rx
-
-        # Update arrow orientations
-        self.arrow_x.setTransform(R)
-        self.arrow_y.setTransform(R)
-        self.arrow_z.setTransform(R)
-
-    def _w_update_plt_encoders(self, left_data, right_data):
-        # Convert polar coordinates to Cartesian coordinates
-        l_rad = np.deg2rad(left_data.position * RAW2DEG)
-        l_x = left_data.magnitude * np.cos(l_rad)
-        l_y = left_data.magnitude * np.sin(l_rad)
-        r_rad = np.deg2rad(right_data.position * RAW2DEG)
-        r_x = right_data.magnitude * np.cos(r_rad)
-        r_y = right_data.magnitude * np.sin(r_rad)
-
-        # Append the new data point to the deque
-        self.plt_encoders_left_data.append((l_x, l_y))
-        self.plt_encoders_right_data.append((r_x, l_y))
-
-        # TODO - try to only add new data without full redraw
-        self.plt_encoders_left_scatter.setData(
-            [p[0] for p in self.plt_encoders_left_data], [p[1] for p in self.plt_encoders_left_data]
-        )
-        self.plt_encoders_left_curve.setData(
-            [p[0] for p in self.plt_encoders_left_data], [p[1] for p in self.plt_encoders_left_data]
-        )
-        self.plt_encoders_right_scatter.setData(
-            [p[0] for p in self.plt_encoders_right_data],
-            [p[1] for p in self.plt_encoders_right_data],
-        )
-        self.plt_encoders_right_curve.setData(
-            [p[0] for p in self.plt_encoders_right_data],
-            [p[1] for p in self.plt_encoders_right_data],
-        )
+        self.plt_encoders.update(data.rleft_encoder, data.rright_encoder)
 
 
 class Renderer:
@@ -608,39 +153,27 @@ class Renderer:
 
     def run(self):
         app = QApplication(sys.argv)
+        window = RendererMainWindow()
 
-        ex: QMainWindow = VehicleRendererApp()
+        t_image_data = ImageDataThread(q_image=self._q_image, q_simulation=self._q_simulation)
+        t_image_data.data_ready.connect(window.update_image_data)
+        window.init_complete.connect(t_image_data.start)
 
-        self._t_ui_setup = RendererUISetup(
-            q_image=self._q_image,
-            q_sensor=self._q_sensor,
-            q_remote=self._q_remote,
-            q_simulation=self._q_simulation,
-        )
-        self._t_ui_setup.ui_setup_data_ready.connect(ex.init_window)
-        self._t_ui_setup.start()
+        t_sensor_data = SensorDataThread(q_sensor=self._q_sensor)
+        t_sensor_data.data_ready.connect(window.update_sensor_data)
+        window.init_complete.connect(t_sensor_data.start)
 
-        self._t_image_data = RendererImageData(
-            q_image=self._q_image, q_simulation=self._q_simulation
-        )
-        self._t_image_data.sig_image_data.connect(ex.update_image_data)
-        ex.window_init_finished.connect(self._t_image_data.start)
+        t_rec = RecordingThread(q_simulation=self._q_simulation)
+        window.init_complete.connect(t_rec.start)
 
-        self._t_sensor_data = RendererSensorData(q_sensor=self._q_sensor)
-        self._t_sensor_data.sig_sensor_data.connect(ex.update_sensor_data)
-        ex.window_init_finished.connect(self._t_sensor_data.start)
+        threads = [t_image_data, t_sensor_data, t_rec]
+        def stop_threads():
+            [t.stop() for t in threads] 
+            [t.wait() for t in threads]
+             
+        app.aboutToQuit.connect(stop_threads)
+    
+        window.init()
+        window.top_tool_bar.record_toggled.connect(t_rec.toggle)
 
-        self._t_rec = RecordingThread(q_simulation=self._q_simulation)
-        ex.sig_toggle_record.connect(self._t_rec.toggle)
-        self._t_rec.start()
-
-        app.aboutToQuit.connect(self._stop_thread_and_wait)
         return app.exec()
-
-    def _stop_thread_and_wait(self):
-        self._t_image_data.stop()
-        self._t_sensor_data.stop()
-        self._t_rec.stop()
-        self._t_image_data.wait()
-        self._t_sensor_data.wait()
-        self._t_rec.wait()
