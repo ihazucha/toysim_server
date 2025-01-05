@@ -1,4 +1,3 @@
-from copy import deepcopy
 from utils.data import SimData, last_record_path
 from modules.recorder import RecordReader
 
@@ -8,6 +7,7 @@ from time import sleep, time_ns
 
 T = 1.0 / 30.0
 
+
 def get_data() -> list[SimData]:
     record_path = last_record_path()
     if record_path is None:
@@ -16,58 +16,63 @@ def get_data() -> list[SimData]:
     data: list[SimData] = RecordReader.read(record_path=record_path)
     return data
 
+
 def threshold1_numpy(img):
     # Create a mask where red is dominant
     red_dominant_mask = (img[:, :, 0] > img[:, :, 1]) | (img[:, :, 0] > img[:, :, 2])
     # Apply the mask to the image
     img[~red_dominant_mask] = [0, 0, 0]
-    return img 
+    return img
+
 
 def hsv_thresh_sliders():
-    cv2.createTrackbar('HMin','image',0,179,lambda: ...) # 0-179 for Opencv
-    cv2.createTrackbar('HMax','image',0,179,lambda: ...)
-    cv2.createTrackbar('SMin','image',0,255,lambda: ...)
-    cv2.createTrackbar('SMax','image',0,255,lambda: ...)
-    cv2.createTrackbar('VMin','image',0,255,lambda: ...)
-    cv2.createTrackbar('VMax','image',0,255,lambda: ...)
+    cv2.createTrackbar("HMin", "image", 0, 179, lambda: ...)  # 0-179 for Opencv
+    cv2.createTrackbar("HMax", "image", 0, 179, lambda: ...)
+    cv2.createTrackbar("SMin", "image", 0, 255, lambda: ...)
+    cv2.createTrackbar("SMax", "image", 0, 255, lambda: ...)
+    cv2.createTrackbar("VMin", "image", 0, 255, lambda: ...)
+    cv2.createTrackbar("VMax", "image", 0, 255, lambda: ...)
 
-    cv2.setTrackbarPos('HMax', 'image', 179)
-    cv2.setTrackbarPos('SMax', 'image', 255)
-    cv2.setTrackbarPos('VMax', 'image', 255)
+    cv2.setTrackbarPos("HMax", "image", 179)
+    cv2.setTrackbarPos("SMax", "image", 255)
+    cv2.setTrackbarPos("VMax", "image", 255)
+
 
 # HMax set to 12
 def hsv_thresh(hsv):
-    hMin = cv2.getTrackbarPos('HMin','image')
-    sMin = cv2.getTrackbarPos('SMin','image')
-    vMin = cv2.getTrackbarPos('VMin','image')
-    
-    hMax = cv2.getTrackbarPos('HMax','image')
-    sMax = cv2.getTrackbarPos('SMax','image')
-    vMax = cv2.getTrackbarPos('VMax','image')
+    hMin = cv2.getTrackbarPos("HMin", "image")
+    sMin = cv2.getTrackbarPos("SMin", "image")
+    vMin = cv2.getTrackbarPos("VMin", "image")
+
+    hMax = cv2.getTrackbarPos("HMax", "image")
+    sMax = cv2.getTrackbarPos("SMax", "image")
+    vMax = cv2.getTrackbarPos("VMax", "image")
 
     lower = np.array([hMin, sMin, vMin])
     upper = np.array([hMax, sMax, vMax])
 
     mask = cv2.inRange(hsv, lower, upper)
-    output = cv2.bitwise_and(bgr, bgr, mask = mask)
+    output = cv2.bitwise_and(bgr, bgr, mask=mask)
     return output
+
 
 def red_mask_thresh(hsv):
     # Red in HSV space is depicted by Hue around 360 deg
     # which is around 179 (max value in OpenCV)
-    
-    lower_red = np.array([0,50,50])
-    upper_red = np.array([7,255,255])
+
+    lower_red = np.array([0, 50, 50])
+    upper_red = np.array([7, 255, 255])
     mask0 = cv2.inRange(hsv, lower_red, upper_red)
 
-    lower_red = np.array([172,50,50])
-    upper_red = np.array([179,255,255])
+    lower_red = np.array([172, 50, 50])
+    upper_red = np.array([179, 255, 255])
     mask1 = cv2.inRange(hsv, lower_red, upper_red)
-    
+
     mask = mask0 + mask1
-    result = cv2.bitwise_and(hsv, hsv, mask=mask) 
+    result = cv2.bitwise_and(hsv, hsv, mask=mask)
 
     return result
+
 
 def get_marker_contours(bgr):
     # Convert the filtered image to grayscale
@@ -78,6 +83,7 @@ def get_marker_contours(bgr):
     contours = [contour for contour in contours if cv2.contourArea(contour) > MIN_CONTOUR_AREA]
     return contours
 
+
 def get_contour_centers(contours):
     contour_centers = []
     for contour in contours:
@@ -87,6 +93,7 @@ def get_contour_centers(contours):
             cY = int(M["m01"] / M["m00"])
             contour_centers.append((cX, cY))
     return contour_centers
+
 
 def draw_poly_curve(img, contour_centers):
     if len(contour_centers) > 1:
@@ -103,19 +110,29 @@ def draw_poly_curve(img, contour_centers):
 
         # Draw the polynomial curve
         for i in range(len(x_new) - 2):
-            cv2.line(img, (int(x_new[i]), int(y_new[i])), (int(x_new[i+1]), int(y_new[i+1])), (0, 255, 0), 2)
+            cv2.line(
+                img,
+                (int(x_new[i]), int(y_new[i])),
+                (int(x_new[i + 1]), int(y_new[i + 1])),
+                (0, 255, 0),
+                2,
+            )
 
 
 def draw_contour_centers(img, countour_centers):
     for cc in countour_centers:
         cv2.circle(img, cc, 5, (0, 255, 0), -1)
 
+
 def project_to_ground_plane(points, homography_matrix):
     # Apply homography to project points to the ground plane
     points_homogeneous = np.hstack((points, np.ones((points.shape[0], 1))))
     ground_points_homogeneous = points_homogeneous @ homography_matrix.T
-    ground_points = ground_points_homogeneous[:, :2] / ground_points_homogeneous[:, 2][:, np.newaxis]
+    ground_points = (
+        ground_points_homogeneous[:, :2] / ground_points_homogeneous[:, 2][:, np.newaxis]
+    )
     return ground_points
+
 
 def project_to_image_plane(points, homography_matrix):
     # Apply inverse homography to project points back to the image plane
@@ -126,24 +143,50 @@ def project_to_image_plane(points, homography_matrix):
     return image_points
 
 
+def calculate_homography_matrix(fov, image_width, image_height, tilt_angle, camera_height):
+    # Calculate the focal length from the FOV
+    focal_length = image_width / (2 * np.tan(np.deg2rad(fov) / 2))
+
+    # Camera intrinsic matrix
+    cx = image_width / 2
+    cy = image_height / 2
+
+    K = np.array([[focal_length, 0, cx], [0, focal_length, cy], [0, 0, 1]])
+
+    # Rotation matrix
+    theta = np.deg2rad(tilt_angle)
+    R = np.array([[1, 0, 0], [0, np.cos(theta), -np.sin(theta)], [0, np.sin(theta), np.cos(theta)]])
+
+    # Translation vector
+    t = np.array([0, 0, -camera_height])
+
+    # Homography matrix
+    H = K @ np.hstack((R[:, :2], t.reshape(-1, 1)))
+    return H
+
+
 if __name__ == "__main__":
     data = get_data()
 
     cv2.namedWindow("image")
 
     # Define the homography matrix (example values, should be calibrated for your setup)
-    homography_matrix = np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0]
-    ])
+    # homography_matrix = np.array([
+    #     [1.0, 0.0, 0.0],
+    #     [0.0, 1.0, 0.0],
+    #     [0.0, 0.0, 1.0]
+    # ])
+    FOV = 90
+    camera_tilt_angle = -15
+    height__cm = 250
+    homography_matrix = calculate_homography_matrix(FOV, 640, 480, camera_tilt_angle, height__cm)
 
     try:
         while True:
             for d in data:
                 tstart = time_ns()
                 # ----------------------------------
-            
+
                 bgr = cv2.cvtColor(d.camera_data.rgb_image, cv2.COLOR_RGB2BGR)
                 hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
 
@@ -158,8 +201,7 @@ if __name__ == "__main__":
                     # Project contour centers to the ground plane
                     contour_centers_np = np.array(contour_centers, dtype=np.float32)
                     ground_points = project_to_ground_plane(contour_centers_np, homography_matrix)
-                    for point in ground_points:
-                        cv2.circle(red_bgr, (int(point[0]), int(point[1])), 5, (255, 0, 0), -1)
+                    ground_points_copy = ground_points.copy()
 
                     # Fit a polynomial through the ground points
                     x_ground = ground_points[:, 0]
@@ -173,20 +215,37 @@ if __name__ == "__main__":
                     ground_poly_points = np.vstack((x_new_ground, y_new_ground)).T
 
                     # Project polynomial points back to the image plane
-                    image_poly_points = project_to_image_plane(ground_poly_points, homography_matrix)
+                    image_poly_points = project_to_image_plane(
+                        ground_poly_points, homography_matrix
+                    )
 
                     # Draw the polynomial curve in the image
                     for i in range(len(image_poly_points) - 1):
-                        cv2.line(red_bgr, (int(image_poly_points[i][0]), int(image_poly_points[i][1])), 
-                                 (int(image_poly_points[i+1][0]), int(image_poly_points[i+1][1])), (0, 255, 0), 2)
+                        cv2.line(
+                            red_bgr,
+                            (int(image_poly_points[i][0]), int(image_poly_points[i][1])),
+                            (int(image_poly_points[i + 1][0]), int(image_poly_points[i + 1][1])),
+                            (0, 255, 0),
+                            2,
+                        )
 
-                cv2.imshow('image', red_bgr)
-                if cv2.waitKey(33) & 0xFF == ord('q'):
+                # Concatenate the original and processed images horizontally
+                combined_image = np.hstack((bgr, red_bgr))
+
+                cv2.imshow("image", combined_image)
+                key_pressed = cv2.waitKey(33) & 0xFF
+                if key_pressed == ord("q"):
                     break
+                elif key_pressed == ord(" "):
+                    while True:
+                        cv2.imshow("image", combined_image)
+                        if cv2.waitKey(33) & 0xFF == ord(" "):
+                            break
+
 
                 # ----------------------------------
                 tend = time_ns()
                 dt = tstart - tend
-                print(f"{dt / 1e9:.2f}")
+                # print(f"{dt / 1e9:.2f}")
     finally:
         cv2.destroyAllWindows()
