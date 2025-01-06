@@ -20,11 +20,11 @@ def icon_path(name: str):
 def record_path(name: str):
     return os.path.join(PATH_RECORDS, f"{name}.tsr")
 
-def last_record_path():
+def last_record_path(pos:int = 0):
     records = os.listdir(PATH_RECORDS)
     records.sort(reverse=True)
     if records:
-        return os.path.join(PATH_RECORDS, records[0])
+        return os.path.join(PATH_RECORDS, records[pos])
     return None
 
 # -------------------------------------------------------------------------------------------------

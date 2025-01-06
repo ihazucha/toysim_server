@@ -74,7 +74,7 @@ def red_mask_thresh(hsv):
     return result
 
 
-def get_marker_contours(bgr):
+def get_marker_contours(red_bgr):
     # Convert the filtered image to grayscale
     gray = cv2.cvtColor(red_bgr, cv2.COLOR_BGR2GRAY)
     # Find contours in the grayscale image
