@@ -78,6 +78,34 @@ def calculate_distance_from_camera(lm, cam_height, cam_tilt_angle, cam_fov, img_
     distance = ground_distance / np.cos(np.radians(x_angle))
     return distance
 
+def homographic_projection(bgr, cam_fov, cam_tilt_angle, cam_height, img_width, img_height):
+    focal_length = img_width / (2 * np.tan(np.radians(cam_fov / 2)))
+    cam_tilt_radians = np.radians(cam_tilt_angle)
+    
+    # Define source points from the original image
+    src_points = np.float32([
+        [0, img_height],
+        [img_width, img_height],
+        [img_width, 0],
+        [0, 0]
+    ])
+    
+    # Define destination points for the bird's eye view
+    dst_points = np.float32([
+        [img_width / 4, img_height],
+        [3 * img_width / 4, img_height],
+        [img_width, 0],
+        [0, 0]
+    ])
+    
+    # Compute the perspective transform matrix
+    M = cv2.getPerspectiveTransform(src_points, dst_points)
+    
+    # Apply the perspective transformation
+    homographic_image = cv2.warpPerspective(bgr, M, (img_width, img_height))
+    
+    return homographic_image
+
 if __name__ == "__main__":
     # write()
     bgr = read_bgr()
@@ -87,15 +115,21 @@ if __name__ == "__main__":
     filtered_hsv = red_mask_thresh(hsv)
     filtered_bgr = cv2.cvtColor(filtered_hsv, cv2.COLOR_HSV2BGR)
 
-    landmarks = find_red_landmarks(filtered_bgr)
+    # Perform homography to get bird's-eye view
+    bird_eye_view = homographic_projection(bgr, CAM_FOV, CAM_TILT_ANGLE, CAM_HEIGHT, IMG_WIDTH, IMG_HEIGHT)
+    filtered_bird_eye_view = homographic_projection(filtered_bgr, CAM_FOV, CAM_TILT_ANGLE, CAM_HEIGHT, IMG_WIDTH, IMG_HEIGHT)
 
-    for lm in landmarks:
+    landmarks_be = find_red_landmarks(filtered_bird_eye_view)
+    landmarks_filtered = find_red_landmarks(filtered_bgr)
+
+    for lm in landmarks_be:
         distance = calculate_distance_from_camera(lm, CAM_HEIGHT, CAM_TILT_ANGLE, CAM_FOV, IMG_WIDTH, IMG_HEIGHT)
         print(f"lm(x, y, dist_real, dist_calc): ({lm[0]}, {lm[1]}, {depth[lm[1], lm[0]]}, {distance:.2f})")
 
     # plot_landmarks(landmarks)
-    draw_contour_centers(filtered_bgr, landmarks)
-    combined_image = np.hstack((bgr, filtered_bgr))
+    draw_contour_centers(filtered_bird_eye_view, landmarks_be)
+    draw_contour_centers(filtered_bgr, landmarks_filtered)
+    combined_image = np.hstack((bgr, filtered_bgr, bird_eye_view, filtered_bird_eye_view))
     cv2.imshow("Combined Image", combined_image)
     if cv2.waitKey(100000) & 0xFF == ord("q"):
         exit()
