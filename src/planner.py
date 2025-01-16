@@ -1,18 +1,30 @@
 from utils.data import SimData, last_record_path
 from modules.recorder import RecordReader
-
+import os 
 import cv2
 import numpy as np
-from time import sleep, time_ns
-
+from time import time_ns
+import pickle 
 T = 1.0 / 30.0
 
+FRAME_BIN_PATH = os.path.join(os.path.dirname(__file__), "../data/sandbox/dataframe.bin")
 
-def get_data() -> list[SimData]:
+def write_last_record_first_frame():
     record_path = last_record_path()
     if record_path is None:
-        print("[Planner] No records found")
-        exit()
+        raise ValueError("[Planner] no records found")
+    data: list[SimData] = RecordReader.read(record_path=record_path)
+    with open(FRAME_BIN_PATH, "wb") as f:
+        pickle.dump(data[0], f)
+
+def read_last_record_first_frame():
+    with open(FRAME_BIN_PATH, "rb") as f:
+        return pickle.load(f)
+
+def get_last_record() -> list[SimData]:
+    record_path = last_record_path()
+    if record_path is None:
+        raise ValueError("[Planner] no records found")
     data: list[SimData] = RecordReader.read(record_path=record_path)
     return data
 
