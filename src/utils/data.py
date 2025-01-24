@@ -17,6 +17,7 @@ def icon_path(name: str):
     return os.path.join(PATH_STATIC, f"{name}.png")
 
 
+# TODO: remove custom data format - use zipped pickles or something sane
 def record_path(name: str):
     return os.path.join(PATH_RECORDS, f"{name}.tsr")
 
@@ -407,5 +408,5 @@ class SimData:
         vehicle_data = SimVehicleData.from_bytes(data_memory_view[data_start:data_end])
         data_start = data_end
         data_end += struct.calcsize(SimData.FORMAT)
-        dt = struct.unpack(SimData.FORMAT, data_memory_view[data_start:data_end])
+        dt = struct.unpack(SimData.FORMAT, data_memory_view[data_start:data_end])[0]
         return SimData(camera_data, vehicle_data, dt)

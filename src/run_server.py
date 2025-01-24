@@ -9,14 +9,10 @@ from modules.render import Renderer
 from utils.ipc import SPMCQueue
 
 
-def type_client(client):
-    return client in ["vehicle", "sim"]
-
-
 def parse_args():
     parser = ArgumentParser(description="Runs ToySim UI")
     parser.add_argument("-i", "--ip", type=str, default=get_local_ip(), help="Bind address")
-    parser.add_argument("-c", "--client", type=type_client, default="vehicle", help="[vehicle|sim]")
+    parser.add_argument("-c", "--controller", help="[dualsense|redroadmarks]")
     return parser.parse_args()
 
 
@@ -31,7 +27,7 @@ def main():
         q_image=q_image, q_sensor=q_sensor, q_remote=q_remote, server_ip=args.ip
     )
     p_sim_network = TcpServer(q_recv=q_simulation, q_send=q_remote, server_ip=args.ip)
-    p_processor = Processor(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote)
+    p_processor = Processor(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote, q_simulation=q_simulation, controller=args.controller)
     renderer = Renderer(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote, q_simulation=q_simulation)
 
     processes = [p_network, p_sim_network, p_processor]

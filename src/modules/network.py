@@ -226,10 +226,15 @@ class TcpConnection:
     def receive_loop(self):
         def send(exit_event: Event):
             q = self._q_send.get_consumer()
+            self._socket.settimeout(1.0)  # Set a timeout of 1 second
             while not exit_event.is_set():
                 try:
-                    data: RemoteControlData = q.get()
-                    self._socket.sendall(data.to_bytes())
+                    data: RemoteControlData = q.get(timeout=1)
+                    if data is not None:
+                        self._socket.sendall(data.to_bytes())
+                except socket.timeout:
+                    if exit_event.is_set():
+                        break
                 except OSError:
                     exit_event.set()
                     self._log("Send failed - connection closed by client")
@@ -251,7 +256,10 @@ class TcpConnection:
         t_send = Thread(target=send, args=[exit_event], daemon=True)
         ts = [t_recv, t_send]
         [t.start() for t in ts]
+        exit_event.wait()
+        print("[Connection] Shutting down send and recv threads..")
         [t.join() for t in ts]
+        print("[Connection] send and recv threads shut down")
 
 
 # --------------------
