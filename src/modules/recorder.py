@@ -1,15 +1,15 @@
 import struct
-from utils.ipc import SPMCQueue
+from utils.ipc import messaging
 from utils.data import SimData
 
 
 class RecordWriter:
-    def __init__(self, queue: SPMCQueue):
-        self._queue = queue
+    def __init__(self):
         self._running = False
 
     def write_new(self, record_path: str):
-        q = self._queue.get_consumer()
+        # TODO: dinstinguish between simulation and real car
+        q = messaging.q_simulation.get_consumer()
         self._running = True
         with open(record_path, "wb") as f:
             frame_size = struct.pack("=Q", SimData.SIZE)
@@ -23,7 +23,6 @@ class RecordWriter:
 
 
 class RecordReader:
-
     @staticmethod
     def read(record_path: str):
         with open(record_path, "rb") as f:

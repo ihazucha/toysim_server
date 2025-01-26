@@ -8,13 +8,13 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
-    QGridLayout,
     QVBoxLayout,
     QHBoxLayout,
     QSpacerItem,
     QLabel,
     QWidget,
-    QSizePolicy
+    QSizePolicy,
+    QTabWidget,
 )
 
 from modules.ui.plots import (
@@ -31,6 +31,7 @@ from utils.ipc import SPMCQueue
 from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
+from modules.ui.config import ConfigPanel
 from modules.ui.data import ImageDataThread, SensorDataThread
 
 
@@ -43,6 +44,7 @@ class RendererMainWindow(QMainWindow):
     def init(self):
         self._init_main_window()
         self._init_sidebar()
+        self._init_tabs()
         self._init_camera_rgb()
         self._init_camera_depth()
         self._init_speed_plot()
@@ -50,12 +52,30 @@ class RendererMainWindow(QMainWindow):
         self._init_map_plot()
         self._init_imu_plot()
         self._init_plt_encoders()
+        self._init_config_panel()  # Add this line
 
         self._init_layout()
         self._init_top_toolbar()
 
         self.showNormal()
         self.init_complete.emit()
+
+    def _init_tabs(self):
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabsClosable(False)
+        self.tab_widget.setMovable(True)
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.setTabPosition(QTabWidget.North)
+        self.tab_widget.setFocusPolicy(Qt.StrongFocus)
+        self.tab_widget.setFocus()
+
+        self.tab1 = QWidget()
+        self.tab2 = QWidget()
+
+        self.tab_widget.addTab(self.tab1, "Main Layout")
+        self.tab_widget.addTab(self.tab2, "Custom Layout")
+
+        self.setCentralWidget(self.tab_widget)
 
     def _init_layout(self):
         imu_layout = QVBoxLayout()
@@ -83,10 +103,7 @@ class RendererMainWindow(QMainWindow):
         main_layout.addLayout(middle_layout)
         main_layout.addLayout(right_layout)
 
-        central_widget = QWidget()
-        central_widget.setObjectName("central")
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
+        self.tab1.setLayout(main_layout)
         self.setStyleSheet(
             """
             background-color: #2d2a2e;
@@ -130,6 +147,10 @@ class RendererMainWindow(QMainWindow):
     def _init_plt_encoders(self):
         self.plt_encoders = EncodersPlotWidget()
 
+    def _init_config_panel(self):
+        self.config_panel = ConfigPanel(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.config_panel)
+
     def update_image_data(self, data):
         qimage, timestamp = data
         self.rgb_pixmap.convertFromImage(qimage)
@@ -143,36 +164,32 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
-    def __init__(
-        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue, q_simulation: SPMCQueue
-    ):
-        self._q_image = q_image
-        self._q_sensor = q_sensor
-        self._q_remote = q_remote
-        self._q_simulation = q_simulation
+    def __init__(self):
+        pass
 
     def run(self):
         app = QApplication(sys.argv)
         window = RendererMainWindow()
 
-        t_image_data = ImageDataThread(q_image=self._q_image, q_simulation=self._q_simulation)
+        t_image_data = ImageDataThread()
         t_image_data.data_ready.connect(window.update_image_data)
         window.init_complete.connect(t_image_data.start)
 
-        t_sensor_data = SensorDataThread(q_sensor=self._q_sensor)
+        t_sensor_data = SensorDataThread()
         t_sensor_data.data_ready.connect(window.update_sensor_data)
         window.init_complete.connect(t_sensor_data.start)
 
-        t_rec = RecordingThread(q_simulation=self._q_simulation)
+        t_rec = RecordingThread()
         window.init_complete.connect(t_rec.start)
 
         threads = [t_image_data, t_sensor_data, t_rec]
+
         def stop_threads():
-            [t.stop() for t in threads] 
+            [t.stop() for t in threads]
             [t.wait() for t in threads]
-             
+
         app.aboutToQuit.connect(stop_threads)
-    
+
         window.init()
         window.top_tool_bar.record_toggled.connect(t_rec.toggle)
 

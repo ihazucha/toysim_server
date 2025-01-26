@@ -3,15 +3,14 @@ from time import sleep, time_ns
 from PySide6.QtCore import QThread
 
 from modules.recorder import RecordWriter
-from utils.ipc import SPMCQueue
 from utils.data import record_path
 
 
 class RecordingThread(QThread):
-    def __init__(self, q_simulation: SPMCQueue):
+    def __init__(self):
         super().__init__()
         self._is_recording = False
-        self._record_writer = RecordWriter(q_simulation)
+        self._record_writer = RecordWriter()
 
     def run(self):
         while True:

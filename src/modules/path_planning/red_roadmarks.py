@@ -175,7 +175,7 @@ class RedRoadmarksPathPlanner:
         return cv2.cvtColor(hsv_filtered, cv2.COLOR_HSV2BGR)
 
     def find_roadmarks(
-        self, bgr_filtered: np.ndarray, min_area: float = 10, max_roadmarks: int = 6
+        self, bgr_filtered: np.ndarray, min_area: float = 12, max_roadmarks: int = 6
     ) -> list:
         # TODO: find better way to detect valid roadmarks
         gray = cv2.cvtColor(bgr_filtered, cv2.COLOR_BGR2GRAY)
@@ -186,8 +186,8 @@ class RedRoadmarksPathPlanner:
                 continue
             x, y, w, h = cv2.boundingRect(c)
             xc, yc = (x + w // 2, y + h // 2)
-            if (xc < (self.camera.img_params.width * 0.2)) or (
-                xc > (self.camera.img_params.width * 0.8)
+            if (xc < (self.camera.img_params.width * 0.1)) or (
+                xc > (self.camera.img_params.width * 0.9)
             ):
                 continue
             roadmark_centers.append((xc, yc))

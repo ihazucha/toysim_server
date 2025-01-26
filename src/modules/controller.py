@@ -1,5 +1,5 @@
 from pydualsense import pydualsense
-from utils.data import RemoteControlData
+from utils.data import RemoteControlData, UIConfigData
 from modules.path_tracking.pid_pure_pursuit import PIDController, PurePursuit
 
 import time
@@ -47,18 +47,21 @@ class DualSense(Controller):
             self._dualsense.close()
 
 class PurePursuitPIDController:
-    cm2m = 1e2
-
-    def __init__(self, pure_pursuit=PurePursuit(), pid=PIDController(Kp=2, Ki=0, Kd=0)):
+    def __init__(self, pure_pursuit=PurePursuit(), pid=PIDController(Kp=1.5, Ki=0, Kd=0)):
         self.pure_pursuit = pure_pursuit
         self.pid = pid
+        self.speed_setpoint = UIConfigData.SET_SPEED
 
     def get_inputs(self, path: np.ndarray, speed_cmps: float, dt: float):
-        path_m = path / self.__class__.cm2m
-        speed_ms = speed_cmps / self.__class__.cm2m
-        self.set_speed = self.pid.get_control(measurement=speed_ms, set_point=10.0, dt=dt)
-        self.set_steering_angle = np.rad2deg(self.pure_pursuit.get_control(path_m, speed_ms))
+        self.set_speed = self.pid.get_control(measurement=speed_cmps, set_point=self.speed_setpoint, dt=dt)
+        self.set_steering_angle = np.rad2deg(self.pure_pursuit.get_control(path, speed_cmps))
         return (self.set_speed, self.set_steering_angle)
     
+    def update_config(self, config: UIConfigData):
+        self.pure_pursuit.K_dd = config.kdd
+        self.pure_pursuit.la_clip_low = config.clip_low
+        self.pure_pursuit.la_clip_high = config.clip_high
+        self.speed_setpoint = config.set_speed
+
     def is_alive(self):
         return True

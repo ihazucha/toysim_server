@@ -1,20 +1,24 @@
 import numpy as np
 
+from utils.data import UIConfigData
+
 class PurePursuit:
-    param_K_dd = 2
+    param_K_dd = UIConfigData.KDD
 
     # The above parameters will be used in the Carla simulation
     # The simple simulation in tests/control/control.ipynb does not use these parameters
-    def __init__(self, K_dd=param_K_dd, wheel_base=3.1, waypoint_shift=2.45):
+    def __init__(self, K_dd=param_K_dd, wheel_base=310, waypoint_shift=245):
         self.K_dd = K_dd
         self.wheel_base = wheel_base
         self.waypoint_shift = waypoint_shift
         self.filtered_intersections = None
+        self.la_clip_low = UIConfigData.CLIP_LOW
+        self.la_clip_high = UIConfigData.CLIP_HIGH
 
     def get_control(self, waypoints, speed):
         # Transform waypoints coordinates such that the frame origin is in the rear wheel
         waypoints[:, 0] += self.waypoint_shift
-        look_ahead_distance = np.clip(self.K_dd * speed, 3, 20)
+        look_ahead_distance = np.clip(self.K_dd * speed, self.la_clip_low, self.la_clip_high)
 
         track_point = self.get_target_point(look_ahead_distance, waypoints)
         if track_point is None:
@@ -116,11 +120,12 @@ class PurePursuit:
 class PIDController:
     def __init__(self, Kp, Ki, Kd):
         self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
-        self.last_p = self.i = self.d = 0
+        self.last_error = 0
+        self.i = 0
 
     def get_control(self, measurement, set_point, dt):
-        p = set_point - measurement
-        self.i += p * dt
-        self.d = (p - self.last_p) / dt
-        self.last_p = p
-        return self.Kp * p + self.Ki * self.i + self.Kd * self.d
+        error = set_point - measurement
+        self.i += error * dt
+        d = (error - self.last_error) / dt
+        self.last_error = error
+        return self.Kp * error + self.Ki * self.i + self.Kd * d

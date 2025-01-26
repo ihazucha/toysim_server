@@ -17,7 +17,8 @@ def icon_path(name: str):
     return os.path.join(PATH_STATIC, f"{name}.png")
 
 
-# TODO: remove custom data format - use zipped pickles or something sane
+# TODO 1: remove custom data format - use zipped pickles or something sane
+# TODO 2: mode to recorder module
 def record_path(name: str):
     return os.path.join(PATH_RECORDS, f"{name}.tsr")
 
@@ -381,6 +382,9 @@ class SimVehicleData:
         return SimVehicleData(speed, steering_angle, pose)
 
 
+# Simulation
+# -------------------------------------------------------------------------------------------------
+
 class SimData:
     FORMAT = "f"
     FORMAT_SIZE = struct.calcsize(FORMAT)
@@ -410,3 +414,37 @@ class SimData:
         data_end += struct.calcsize(SimData.FORMAT)
         dt = struct.unpack(SimData.FORMAT, data_memory_view[data_start:data_end])[0]
         return SimData(camera_data, vehicle_data, dt)
+
+
+# UI
+# -------------------------------------------------------------------------------------------------
+
+class UIConfigData:
+    SET_SPEED = 1000
+    KDD = 2
+    CLIP_LOW = 300
+    CLIP_HIGH = 2000
+
+    def __init__(
+        self,
+        set_speed: float = SET_SPEED,
+        kdd: float = KDD,
+        clip_low: float = CLIP_LOW,
+        clip_high: float = CLIP_HIGH,
+    ):
+        self.set_speed = set_speed
+        self.kdd = kdd
+        self.clip_low = clip_low
+        self.clip_high = clip_high
+
+    def __str__(self):
+        return (
+            f"ConfigData(set_speed={self.set_speed}, "
+            f"kdd={self.kdd}, "
+            f"clip_low={self.clip_low}, "
+            f"clip_high={self.clip_high})"
+        )
+
+class ControllerData:
+    def __init__(self, image: np.ndarray):
+        self.image = image

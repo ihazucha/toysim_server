@@ -6,7 +6,7 @@ from multiprocessing import Process
 from threading import Thread, Event
 from typing import Tuple
 
-from utils.ipc import SPMCQueue
+from utils.ipc import messaging
 from utils.image import jpg_encode
 from utils.data import JPGImageData, RawImageData, RemoteControlData, SensorData, SimData
 
@@ -27,13 +27,12 @@ class ImageDataSender(Thread):
     DATA_HEADER_SIZE = struct.calcsize("=BQ")
     MAX_DATA_SIZE = MAX_DGRAM_SIZE - DGRAM_HEADER_SIZE - DATA_HEADER_SIZE
 
-    def __init__(self, q_image: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
-        self._q_image = q_image
         self._addr = addr
 
     def run(self) -> None:
-        q = self._q_image.get_consumer()
+        q = messaging.q_image.get_consumer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._sock = sock
@@ -56,9 +55,8 @@ class ImageDataSender(Thread):
 
 
 class ImageDataReceiver(Thread):
-    def __init__(self, q_image: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
-        self._q_image = q_image
         self._addr = addr
 
     def run(self):
@@ -66,7 +64,7 @@ class ImageDataReceiver(Thread):
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(self._addr)
             self._sock = s
-            q = self._q_image.get_producer()
+            q = messaging.q_image.get_producer()
             while True:
                 jpg_image_data = self._recv()
                 q.put(jpg_image_data)
@@ -85,13 +83,12 @@ class ImageDataReceiver(Thread):
 
 
 class SensorDataSender(Thread):
-    def __init__(self, q_sensor: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
         self._addr = addr
-        self._q_sensor = q_sensor
 
     def run(self):
-        q = self._q_sensor.get_consumer()
+        q = messaging.q_sensor.get_consumer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             while True:
@@ -100,9 +97,8 @@ class SensorDataSender(Thread):
 
 
 class SensorDataReceiver(Thread):
-    def __init__(self, q_sensor: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
-        self._q_sensor = q_sensor
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(addr)
@@ -118,7 +114,7 @@ class SensorDataReceiver(Thread):
         return addr[0]
 
     def _run(self):
-        q = self._q_sensor.get_producer()
+        q = messaging.q_sensor.get_producer()
         while True:
             data, _ = self._sock.recvfrom(MAX_DGRAM_SIZE)
             decoded_data = SensorData.from_bytes(data)
@@ -129,28 +125,26 @@ class SensorDataReceiver(Thread):
 
 
 class RemoteDataSender(Thread):
-    def __init__(self, q_remote: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
-        self._q_remote = q_remote
         self._addr = addr
 
     def run(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            q = self._q_remote.get_consumer()
+            q = messaging.q_remote.get_consumer()
             while True:
                 data = q.get()
                 s.sendto(data.to_bytes(), self._addr)
 
 
 class RemoteDataReceiver(Thread):
-    def __init__(self, q_remote: SPMCQueue, addr: Tuple[str, int]):
+    def __init__(self, addr: Tuple[str, int]):
         super().__init__()
-        self._q_remote = q_remote
         self._addr = addr
 
     def run(self):
-        q = self._q_remote.get_producer()
+        q = messaging.q_remote.get_producer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(self._addr)
@@ -163,10 +157,8 @@ class RemoteDataReceiver(Thread):
 
 
 class TcpServer(Process):
-    def __init__(self, q_recv: SPMCQueue, q_send: SPMCQueue, server_ip: str):
+    def __init__(self, server_ip: str):
         super().__init__()
-        self._q_recv = q_recv
-        self._q_send = q_send
         self._sock = self._bind_listen((server_ip, 8888))
 
     def _log(self, msg: str):
@@ -184,17 +176,15 @@ class TcpServer(Process):
             self._log(f"Waiting for connection...")
             sock, addr = self._sock.accept()
             self._log(f"Connected: {addr}")
-            connection = TcpConnection(sock, self._q_recv, self._q_send)
+            connection = TcpConnection(sock)
             connection.receive_loop()
             del connection
             self._log(f"Disconnected: {addr}")
 
 
 class TcpConnection:
-    def __init__(self, socket: socket, q_recv: SPMCQueue, q_send: SPMCQueue):
+    def __init__(self, socket: socket):
         self._socket = socket
-        self._q_recv = q_recv
-        self._q_send = q_send
 
     def __del__(self):
         self._close()
@@ -225,7 +215,7 @@ class TcpConnection:
 
     def receive_loop(self):
         def send(exit_event: Event):
-            q = self._q_send.get_consumer()
+            q = messaging.q_remote.get_consumer()
             self._socket.settimeout(1.0)  # Set a timeout of 1 second
             while not exit_event.is_set():
                 try:
@@ -241,7 +231,7 @@ class TcpConnection:
                     break
 
         def recv(exit_event: Event):
-            q = self._q_recv.get_producer()
+            q = messaging.q_simulation.get_producer()
             while not exit_event.is_set():
                 try:
                     data = self._recv_data(SimData.SIZE)
@@ -266,46 +256,28 @@ class TcpConnection:
 
 
 class NetworkClient(Process):
-    def __init__(
-        self,
-        q_image: SPMCQueue,
-        q_sensor: SPMCQueue,
-        q_remote: SPMCQueue,
-        server_ip: str,
-    ):
+    def __init__(self, server_ip: str):
         super().__init__()
-        self._q_image = q_image
-        self._q_sensor = q_sensor
-        self._q_remote = q_remote
         self._server_ip = server_ip
 
     def run(self):
-        t_image = ImageDataSender(q_image=self._q_image, addr=(self._server_ip, 5500))
-        t_sensor = SensorDataSender(q_sensor=self._q_sensor, addr=(self._server_ip, 5510))
-        t_remote = RemoteDataReceiver(q_remote=self._q_remote, addr=(get_local_ip(), 5520))
+        t_image = ImageDataSender(addr=(self._server_ip, 5500))
+        t_sensor = SensorDataSender(addr=(self._server_ip, 5510))
+        t_remote = RemoteDataReceiver(addr=(get_local_ip(), 5520))
         ts = [t_image, t_sensor, t_remote]
         [t.start() for t in ts]
         [t.join() for t in ts]
 
 
 class NetworkServer(Process):
-    def __init__(
-        self,
-        q_image: SPMCQueue,
-        q_sensor: SPMCQueue,
-        q_remote: SPMCQueue,
-        server_ip: str = get_local_ip(),
-    ):
+    def __init__(self, server_ip: str = get_local_ip()):
         super().__init__()
-        self._q_image = q_image
-        self._q_sensor = q_sensor
-        self._q_remote = q_remote
         self._server_ip = server_ip
 
     def run(self):
-        t_image = ImageDataReceiver(q_image=self._q_image, addr=(self._server_ip, 5500))
-        t_sensor = SensorDataReceiver(q_sensor=self._q_sensor, addr=(self._server_ip, 5510))
-        t_remote = RemoteDataSender(q_remote=self._q_remote, addr=(t_sensor.get_client_ip(), 5520))
+        t_image = ImageDataReceiver(addr=(self._server_ip, 5500))
+        t_sensor = SensorDataReceiver(addr=(self._server_ip, 5510))
+        t_remote = RemoteDataSender(addr=(t_sensor.get_client_ip(), 5520))
         threads = [t_image, t_sensor, t_remote]
         [t.start() for t in threads]
         [t.join() for t in threads]
