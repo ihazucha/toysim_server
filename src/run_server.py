@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import sys
 from argparse import ArgumentParser
 
@@ -28,7 +26,7 @@ def main():
         p_sim_network,
         p_processor,
     ]
-
+    
     [p.start() for p in processes]
     exit_code = renderer.run()
     [p.terminate() for p in processes]

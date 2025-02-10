@@ -1,6 +1,6 @@
 import struct
-from utils.ipc import messaging
-from utils.data import SimData
+from datalink.ipc import messaging
+from datalink.data import SimData
 
 
 class RecordWriter:

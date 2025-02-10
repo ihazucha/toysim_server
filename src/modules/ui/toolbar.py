@@ -2,7 +2,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QToolBar, QWidget
 from PySide6.QtGui import QIcon, QAction
 
-from utils.data import icon_path
+from utils.paths import icon_path
 
 
 class TopToolBar(QToolBar):

@@ -2,7 +2,7 @@ import os
 
 from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QListWidget
 
-from utils.data import PATH_RECORDS
+from utils.paths import PATH_RECORDS
 
 
 class RecordSidebar(QDockWidget):

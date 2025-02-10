@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen, mkBrush
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
-from utils.data import EncoderData, Rotation
+from datalink.data import EncoderData, Rotation
 
 FPS = 60
 DATA_QUEUE_LENGTH_SECONDS = 5

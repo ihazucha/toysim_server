@@ -1,10 +1,9 @@
 import sys
-
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import (
-    QPixmap,
-    QIcon,
-)
+import os
+import json
+from pathlib import Path
+from PySide6.QtCore import Signal, Qt, QRect
+from PySide6.QtGui import QGuiApplication, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -25,7 +24,7 @@ from modules.ui.plots import (
     SteeringPlotWidget,
 )
 
-from utils.data import icon_path
+from utils.paths import icon_path
 
 from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
@@ -39,6 +38,28 @@ class RendererMainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.settings_path = Path(__file__).parent / "ui/settings/window_settings.json"
+        self.load_window_position()
+
+    def closeEvent(self, event):
+        self.save_window_position()
+        event.accept()
+
+    def load_window_position(self):
+        if self.settings_path.exists():
+            with open(self.settings_path, "r") as f:
+                pos = json.load(f)
+                screen_geometry = QGuiApplication.primaryScreen().availableGeometry()
+                # If off-screen (e.g. due to monitor change), use default
+                if not screen_geometry.contains(QRect(pos["x"], pos["y"], self.width(), self.height())):
+                    pos["x"], pos["y"] = 100, 100
+                self.move(pos["x"], pos["y"])
+
+    def save_window_position(self):
+        pos = {"x": self.x(), "y": self.y()}
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.settings_path, "w") as f:
+            json.dump(pos, f)
 
     def init(self):
         self._init_main_window()
@@ -51,7 +72,7 @@ class RendererMainWindow(QMainWindow):
         self._init_map_plot()
         self._init_imu_plot()
         self._init_plt_encoders()
-        self._init_config_panel()  # Add this line
+        self._init_config_panel()
 
         self._init_layout()
         self._init_top_toolbar()
@@ -163,9 +184,6 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
-    def __init__(self):
-        pass
-
     def run(self):
         app = QApplication(sys.argv)
         window = RendererMainWindow()
@@ -184,7 +202,8 @@ class Renderer:
         threads = [t_image_data, t_sensor_data, t_rec]
 
         def stop_threads():
-            [t.exit() for t in threads]
+            # TODO: try to exit gracefully instead of terminate
+            [t.terminate() for t in threads]
             [t.wait() for t in threads]
 
         app.aboutToQuit.connect(stop_threads)

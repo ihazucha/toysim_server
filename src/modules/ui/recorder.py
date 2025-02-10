@@ -3,7 +3,7 @@ from time import sleep, time_ns
 from PySide6.QtCore import QThread
 
 from modules.recorder import RecordWriter
-from utils.data import record_path
+from utils.paths import record_path
 
 
 class RecordingThread(QThread):

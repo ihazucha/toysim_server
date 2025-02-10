@@ -7,8 +7,8 @@ import numpy as np
 
 from multiprocessing import Process
 
-from src.utils.ipc import SPMCQueue
-from src.utils.data import RawImageData, SensorData, IMUData, EncoderData, Pose, Position, Rotation, RemoteControlData
+from src.datalink.ipc import SPMCQueue
+from src.datalink.data import RawImageData, SensorData, IMUData, EncoderData, Pose, Position, Rotation, RemoteControlData
 from src.modules.network import NetworkClient, get_local_ip
 
 

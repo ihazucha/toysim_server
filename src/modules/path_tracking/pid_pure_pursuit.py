@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils.data import UIConfigData
+from datalink.data import UIConfigData
 
 class PurePursuit:
     param_K_dd = UIConfigData.KDD

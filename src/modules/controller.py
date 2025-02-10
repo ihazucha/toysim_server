@@ -1,5 +1,5 @@
 from pydualsense import pydualsense
-from utils.data import RemoteControlData, UIConfigData
+from datalink.data import RemoteControlData, UIConfigData
 from modules.path_tracking.pid_pure_pursuit import PIDController, PurePursuit
 
 import time

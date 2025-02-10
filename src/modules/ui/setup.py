@@ -3,9 +3,9 @@ import cv2
 
 from PySide6.QtCore import QThread, Signal
 
-from utils.ipc import SPMCQueue
+from datalink.ipc import SPMCQueue
 from utils.env import Environment, ENV
-from utils.data import JPGImageData, SimData
+from datalink.data import JPGImageData, SimData
 
 
 class RendererUISetup(QThread):

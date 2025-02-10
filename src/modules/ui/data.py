@@ -6,10 +6,10 @@ from typing import Any
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
-from utils.ipc import messaging
+from datalink.ipc import messaging
 from utils.env import Environment, ENV
-from utils.data import ControllerData, JPGImageData, SimData
-from utils.image import jpg_decode
+from datalink.data import ControllerData, JPGImageData, SimData
+from datalink.utils import jpg_decode
 
 
 class ImageDataThread(QThread):

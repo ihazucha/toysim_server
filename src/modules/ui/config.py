@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDoubleValidator
 
-from utils.ipc import messaging
-from utils.data import UIConfigData
+from datalink.ipc import messaging
+from datalink.data import UIConfigData
 
 
 class FloatSlider(QWidget):

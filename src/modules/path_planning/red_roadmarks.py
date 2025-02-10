@@ -4,15 +4,7 @@ import cv2
 from scipy.interpolate import interp1d
 from pathlib import Path
 
-from utils.data import Position, Rotation
-
-
-class ImageParams:
-    def __init__(self, width: int, height: int, fov_deg: float):
-        self.width = width
-        self.height = height
-        self.fov_deg = fov_deg
-
+from datalink.data import Position, Rotation, ImageParams
 
 class Camera:
     def __init__(self, position: Position, rotation: Rotation, img_params: ImageParams):
@@ -128,14 +120,7 @@ class Camera:
 
 
 class RedRoadmarksPathPlanner:
-    # TODO: this camera only works for simulation
-    CAMERA = Camera(
-        Position(0, 250, 0),
-        Rotation(0, -15.05, 0),
-        ImageParams(width=640, height=480, fov_deg=90),
-    )
-
-    def __init__(self, camera: Camera = CAMERA):
+    def __init__(self, camera: Camera):
         self.camera = camera
 
         # Intermediate calculations for easier debugging

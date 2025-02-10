@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 from modules.recorder import RecordReader 
-from utils.data import last_record_path
+from utils.paths import last_record_path
 
-from utils.data import Position, Rotation, SimData
+from datalink.data import Position, Rotation, SimData
 from scipy.interpolate import interp1d
 
 
