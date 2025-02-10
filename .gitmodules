@@ -1,0 +1,3 @@
+[submodule "src/datalink"]
+	path = src/datalink
+	url = https://github.com/ihazucha/toysim_datalink.git
