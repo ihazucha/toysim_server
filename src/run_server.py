@@ -4,13 +4,14 @@ import sys
 from argparse import ArgumentParser
 
 from modules.network import NetworkServer, TcpServer, get_local_ip
-from modules.processor import Processor
+from modules.processor import Processor, ControllerType
 from modules.render import Renderer
+
 
 def parse_args():
     parser = ArgumentParser(description="Runs ToySim UI")
     parser.add_argument("-i", "--ip", type=str, default=get_local_ip(), help="Bind address")
-    parser.add_argument("-c", "--controller", help="[dualsense|redroadmarks]")
+    parser.add_argument("-c", "--controller", type=str, choices=[c.value for c in ControllerType])
     return parser.parse_args()
 
 
@@ -19,7 +20,7 @@ def main():
 
     p_network = NetworkServer(server_ip=args.ip)
     p_sim_network = TcpServer(server_ip=args.ip)
-    p_processor = Processor(controller=args.controller)
+    p_processor = Processor(controller=ControllerType(args.controller))
     renderer = Renderer()
 
     processes = [

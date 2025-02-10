@@ -132,7 +132,7 @@ class RemoteDataSender(Thread):
     def run(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            q = messaging.q_remote.get_consumer()
+            q = messaging.q_control.get_consumer()
             while True:
                 data = q.get()
                 s.sendto(data.to_bytes(), self._addr)
@@ -144,7 +144,7 @@ class RemoteDataReceiver(Thread):
         self._addr = addr
 
     def run(self):
-        q = messaging.q_remote.get_producer()
+        q = messaging.q_control.get_producer()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(self._addr)
@@ -215,7 +215,7 @@ class TcpConnection:
 
     def receive_loop(self):
         def send(exit_event: Event):
-            q = messaging.q_remote.get_consumer()
+            q = messaging.q_control.get_consumer()
             self._socket.settimeout(1.0)  # Set a timeout of 1 second
             while not exit_event.is_set():
                 try:

@@ -13,6 +13,7 @@ from PySide6.QtGui import QDoubleValidator
 from utils.ipc import messaging
 from utils.data import UIConfigData
 
+
 class FloatSlider(QWidget):
     def __init__(self, key, label_text, min, max, default, step, config_panel, parent=None):
         super().__init__(parent)
@@ -41,15 +42,15 @@ class FloatSlider(QWidget):
         self.slider.setSingleStep(int(step * self.scale_factor))
         self.slider.setTickPosition(QSlider.TicksBelow)
         self.slider.setTickInterval(int(step * self.scale_factor))
-        self.slider.setFixedWidth(200)  # Make the slider bigger
+        self.slider.setFixedWidth(200)
 
         self.slider.valueChanged.connect(self.update_text_input)
         self.value_input.textChanged.connect(self.update_slider_value)
 
         slider_layout = QHBoxLayout()
-        slider_layout.addWidget(QLabel(f"{min:.2f}"))  # Minimum value label
+        slider_layout.addWidget(QLabel(f"{min:.2f}"))
         slider_layout.addWidget(self.slider)
-        slider_layout.addWidget(QLabel(f"{max:.2f}"))  # Maximum value label
+        slider_layout.addWidget(QLabel(f"{max:.2f}"))
 
         layout.addLayout(label_layout)
         layout.addLayout(slider_layout)
@@ -64,18 +65,14 @@ class FloatSlider(QWidget):
 
     def update_slider_value(self, text):
         try:
-            float_value = float(text)
-            if (
-                self.slider.minimum()
-                <= int(float_value * self.scale_factor)
-                <= self.slider.maximum()
-            ):
-                # Prevents cyclic update due to the change of value input
+            int_value = int(float(text) * self.scale_factor)
+            if self.slider.minimum() <= int_value <= self.slider.maximum():
                 self.slider.blockSignals(True)
-                self.slider.setValue(int(float_value * self.scale_factor))
+                self.slider.setValue(int_value)
                 self.slider.blockSignals(False)
         except ValueError:
             pass  # Ignore invalid input
+
 
 class ConfigPanel(QDockWidget):
     def __init__(self, parent=None):

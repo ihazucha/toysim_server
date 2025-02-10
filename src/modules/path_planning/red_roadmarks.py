@@ -128,7 +128,14 @@ class Camera:
 
 
 class RedRoadmarksPathPlanner:
-    def __init__(self, camera: Camera):
+    # TODO: this camera only works for simulation
+    CAMERA = Camera(
+        Position(0, 250, 0),
+        Rotation(0, -15.05, 0),
+        ImageParams(width=640, height=480, fov_deg=90),
+    )
+
+    def __init__(self, camera: Camera = CAMERA):
         self.camera = camera
 
         # Intermediate calculations for easier debugging
@@ -175,7 +182,7 @@ class RedRoadmarksPathPlanner:
         return cv2.cvtColor(hsv_filtered, cv2.COLOR_HSV2BGR)
 
     def find_roadmarks(
-        self, bgr_filtered: np.ndarray, min_area: float = 12, max_roadmarks: int = 6
+        self, bgr_filtered: np.ndarray, min_area: float = 11, max_roadmarks: int = 6
     ) -> list:
         # TODO: find better way to detect valid roadmarks
         gray = cv2.cvtColor(bgr_filtered, cv2.COLOR_BGR2GRAY)

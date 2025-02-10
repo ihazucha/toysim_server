@@ -26,7 +26,6 @@ from modules.ui.plots import (
 )
 
 from utils.data import icon_path
-from utils.ipc import SPMCQueue
 
 from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
@@ -185,7 +184,7 @@ class Renderer:
         threads = [t_image_data, t_sensor_data, t_rec]
 
         def stop_threads():
-            [t.stop() for t in threads]
+            [t.exit() for t in threads]
             [t.wait() for t in threads]
 
         app.aboutToQuit.connect(stop_threads)

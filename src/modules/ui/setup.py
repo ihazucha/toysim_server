@@ -12,12 +12,12 @@ class RendererUISetup(QThread):
     ui_setup_data_ready = Signal(tuple)
 
     def __init__(
-        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_remote: SPMCQueue, q_simulation: SPMCQueue
+        self, q_image: SPMCQueue, q_sensor: SPMCQueue, q_control: SPMCQueue, q_simulation: SPMCQueue
     ):
         super().__init__()
         self._q_image = q_image
         self._q_sensor = q_sensor
-        self._q_remote = q_remote
+        self._q_control = q_control
         self._q_simulation = q_simulation
 
     def run(self):

@@ -67,12 +67,12 @@ class RemoteReceiver(Process):
 if __name__ == '__main__':
     q_image = SPMCQueue(11001)
     q_sensor = SPMCQueue(11002)
-    q_remote = SPMCQueue(11003)
+    q_control = SPMCQueue(11003)
     
     p_image = ImageGenerator(q_image)
     p_sensor = SensorGenerator(q_sensor)
-    p_remote = RemoteReceiver(q_remote)
-    p_network = NetworkClient(q_image=q_image, q_sensor=q_sensor, q_remote=q_remote, server_ip=get_local_ip())
+    p_remote = RemoteReceiver(q_control)
+    p_network = NetworkClient(q_image=q_image, q_sensor=q_sensor, q_control=q_control, server_ip=get_local_ip())
 
     ps = [p_image, p_sensor, p_remote, p_network]
 

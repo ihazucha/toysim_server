@@ -420,10 +420,14 @@ class SimData:
 # -------------------------------------------------------------------------------------------------
 
 class UIConfigData:
-    SET_SPEED = 1000
-    KDD = 2
+    # SET_SPEED = 1800
+    # KDD = 1.8
+    # CLIP_LOW = 500
+    # CLIP_HIGH = 2600
+    SET_SPEED = 2000
+    KDD = 2.2
     CLIP_LOW = 300
-    CLIP_HIGH = 2000
+    CLIP_HIGH = 2400
 
     def __init__(
         self,

@@ -11,11 +11,11 @@ class SPMCQueue:
 
     def __init__(self, port: int):
         self._port = port
-        # TODO: using singleton pattern - this stops working (on Windows) because messaging is instantiated for every process 
+        # TODO: doesn't work for Messaging singleton - on Windows, every process creates new instance
         self._has_producer = Value("b", False)
 
     def get_producer(self):
-        assert not self._has_producer.value, f"[{self.__class__.__name__}] Producer already exists"
+        assert not self._has_producer.value, f"[{self.__class__.__name__}] Producer already exists!"
         self._has_producer.value = True
         return SPMCQueue.Producer(self._port, self._has_producer)
 
@@ -59,7 +59,7 @@ class Messaging:
     def __init__(self):
         self.q_image = SPMCQueue(port=10001)
         self.q_sensor = SPMCQueue(port=10002)
-        self.q_remote = SPMCQueue(port=10003)
+        self.q_control = SPMCQueue(port=10003)
         self.q_simulation = SPMCQueue(port=10004)
         self.q_processing = SPMCQueue(port=10005)
         self.q_ui = SPMCQueue(port=10006)
