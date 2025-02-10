@@ -3,7 +3,7 @@
 import sys
 from argparse import ArgumentParser
 
-from modules.network import NetworkServer, TcpServer, get_local_ip
+from datalink.network import NetworkServer, TcpServer, get_local_ip
 from modules.processor import Processor, ControllerType
 from modules.render import Renderer
 
