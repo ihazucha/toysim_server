@@ -34,7 +34,7 @@ class RendererUISetup(QThread):
             q_simulation = self._q_simulation.get_consumer()
             sim_data_bytes = q_simulation.get()
             sim_data: SimData = SimData.from_bytes(sim_data_bytes)
-            height, width, _ = sim_data.camera_data.rgb_image.shape
+            height, width, _ = sim_data.camera.rgb_image.shape
             setup_data = (width, height)
         else:
             raise NotImplementedError()

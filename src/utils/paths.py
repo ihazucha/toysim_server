@@ -1,24 +1,20 @@
+from pathlib import Path
 
-import os
-
-CWD = os.path.dirname(__file__)
-PATH_DATA = os.path.join(CWD, "../../data")
-PATH_RECORDS = os.path.join(PATH_DATA, "records/")
-PATH_STATIC = os.path.join(PATH_DATA, "static/")
-
+_CWD = Path(__file__).parent
+PATH_STORAGE = _CWD.parents[1] / "storage"
+PATH_RECORDS = PATH_STORAGE / "records"
+PATH_STATIC = PATH_STORAGE / "static"
 
 def icon_path(name: str):
-    return os.path.join(PATH_STATIC, f"{name}.png")
-
+    return str(PATH_STATIC / f"{name}.png")
 
 # TODO 1: remove custom data format - use zipped pickles or something sane
-# TODO 2: mode to recorder module
+# TODO 2: move to recorder module
 def record_path(name: str):
-    return os.path.join(PATH_RECORDS, f"{name}.tsr")
+    return str(PATH_RECORDS / f"{name}.pickle")
 
-def last_record_path(pos:int = 0):
-    records = os.listdir(PATH_RECORDS)
-    records.sort(reverse=True)
+def last_record_path(pos: int = 0):
+    records = sorted(PATH_RECORDS.iterdir(), reverse=True)
     if records:
-        return os.path.join(PATH_RECORDS, records[pos])
+        return records[pos]
     return None

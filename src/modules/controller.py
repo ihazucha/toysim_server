@@ -1,28 +1,38 @@
 from pydualsense import pydualsense
-from datalink.data import RemoteControlData, UIConfigData
-from modules.path_tracking.pid_pure_pursuit import PIDController, PurePursuit
+from datalink.data import UIConfigData
+from modules.path_tracking.pid_pure_pursuit import PID, PurePursuit
 
-import time
+from time import time_ns
 import numpy as np
 
 
 class Controller:
-    def get_inputs(self) -> tuple[float, float]:
+    def __init__(self):
+        self.v = 0.0
+        self.sa = 0.0
+        self.timestamp = time_ns()
+
+    def update(self) -> tuple[float, float]:
         raise NotImplementedError()
 
     def is_alive(self) -> bool:
         raise NotImplementedError()
 
+
+# TODO: v is implemented as power here, when it should be in m/s
+#       the internal power management should be left on the actual
+#       car/simulation to make this a common interface
 class DualSense(Controller):
     MAX_POWER = 0.2  # <0,1>
-    MAX_STEERING_ANGLE = 25.0  # Both sides
-    TRIGGER_BUTTON_RESOLUTION = 2**8
+    MAX_STEERING_ANGLE = 25.0
+    TRIGGER_RESOLUTION = 2**8
     STICK_RESOLUTION = 2**7
-    BTN_FORCE2POWER = MAX_POWER / TRIGGER_BUTTON_RESOLUTION
-    STICK_FORCE2POWER = MAX_STEERING_ANGLE / STICK_RESOLUTION
-    CONTROLLER_STICK_OFFSET = MAX_STEERING_ANGLE / STICK_RESOLUTION
+
+    TRIGGER_FORCE2POWER = MAX_POWER / TRIGGER_RESOLUTION
+    STICK_DEFLECT2ANGLE = MAX_STEERING_ANGLE / STICK_RESOLUTION
 
     def __init__(self):
+        super().__init__()
         self._dualsense = pydualsense()
         self._connected = False
         try:
@@ -32,31 +42,35 @@ class DualSense(Controller):
         except:
             print("[DualSense] Unable to connect.")
 
-    def get_inputs(self):
-        # Brake - Gas = Force
-        force_diff = self._dualsense.state.L2 - self._dualsense.state.R2
-        set_speed = DualSense.BTN_FORCE2POWER * force_diff
-        set_steering_angle = DualSense.STICK_FORCE2POWER * self._dualsense.state.LX + DualSense.CONTROLLER_STICK_OFFSET
-        return RemoteControlData(time.time_ns(), set_speed, set_steering_angle)
+    def update(self):
+        forward_power = self._dualsense.state.L2
+        backward_power = self._dualsense.state.R2
+        self.v = DualSense.TRIGGER_FORCE2POWER * (forward_power - backward_power)
+        self.sa = DualSense.STICK_DEFLECT2ANGLE * self._dualsense.state.LX
+        self.timestamp = time_ns()
 
     def is_alive(self):
+        # TODO: check for status dynamically
         return self._connected
 
-    def close(self):
+    def shutdown(self):
         if self.isAlive():
             self._dualsense.close()
 
-class PurePursuitPIDController:
-    def __init__(self, pure_pursuit=PurePursuit(), pid=PIDController(Kp=1.5, Ki=0, Kd=0)):
+
+class PurePursuitPIDController(Controller):
+    def __init__(self, pure_pursuit=PurePursuit(), pid=PID(Kp=1.5, Ki=0, Kd=0)):
+        super().__init__()
         self.pure_pursuit = pure_pursuit
         self.pid = pid
-        self.speed_setpoint = UIConfigData.SET_SPEED
+        # TODO: instead of UIConfigData, create an interface and send this during initialisation
+        self.v_desired = UIConfigData.SET_SPEED
 
-    def get_inputs(self, path: np.ndarray, speed_cmps: float, dt: float):
-        self.set_speed = self.pid.get_control(measurement=speed_cmps, set_point=self.speed_setpoint, dt=dt)
-        self.set_steering_angle = np.rad2deg(self.pure_pursuit.get_control(path, speed_cmps))
-        return (self.set_speed, self.set_steering_angle)
-    
+    def update(self, path: np.ndarray, v: float, dt: float):
+        self.v = self.pid.get_control(measured=v, desired=self.v_desired, dt=dt)
+        self.sa = np.rad2deg(self.pure_pursuit.get_control(path, v))
+        self.timestamp = time_ns()
+
     def update_config(self, config: UIConfigData):
         self.pure_pursuit.K_dd = config.kdd
         self.pure_pursuit.la_clip_low = config.clip_low

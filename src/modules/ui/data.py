@@ -1,5 +1,5 @@
 import numpy as np
-import cv2 
+import cv2
 
 from typing import Any
 
@@ -8,12 +8,39 @@ from PySide6.QtGui import QImage
 
 from datalink.ipc import messaging
 from utils.env import Environment, ENV
-from datalink.data import ControllerData, JPGImageData, SimData
-from datalink.utils import jpg_decode
+from datalink.data import ProcessedData, JPGImageData
+from cv2 import imdecode, IMREAD_COLOR
+
+
+class QSimData:
+    def __init__(self, data: ProcessedData):
+        self.data: ProcessedData = data
+        self.processed_rgb_qimage: QImage = None
+        self.processed_depth_qimage: QImage = None
+
+
+# TODO: make more explicit what is the format of this image
+def npimage2qimage(npimage: np.ndarray[Any, np.dtype[np.uint8]]):
+    height, width, channel = npimage.shape
+    bytes_per_line = channel * width
+    return QImage(npimage.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+
+def depth2qimage(depth: np.ndarray) -> QImage:
+    depth_colormap = depth_to_colormap(depth)
+    h, w = depth_colormap.shape[1], depth_colormap.shape[0]
+    return QImage(depth_colormap.data, h, w, QImage.Format_BGR888)
+
+
+def depth_to_colormap(depth_data: np.ndarray):
+    normalized_inverted = 255 - (depth_data / 5000 * 255).astype(np.uint8)
+    colormap = cv2.applyColorMap(normalized_inverted, cv2.COLORMAP_INFERNO)
+    return colormap
 
 
 class ImageDataThread(QThread):
-    data_ready = Signal(tuple)
+    simulation_data_ready = Signal(QSimData)
+    data_ready = Signal(tuple)  # TODO: rework for vehicle - refactor to common standard
 
     def __init__(self):
         super().__init__()
@@ -25,37 +52,26 @@ class ImageDataThread(QThread):
         elif ENV == Environment.SIM:
             self._run_sim()
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"No runtime found for ENV={ENV}")
 
     def _run_vehicle(self):
         q = messaging.q_image.get_consumer()
         while self._is_running:
             jpg_image_data: JPGImageData = q.get()
-            image_array = jpg_decode(jpg_image_data.jpg)
-            qimage = __class__.ndarray2qimage(image_array)
+            image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
+            qimage = npimage2qimage(image_array)
             self.data_ready.emit((qimage, jpg_image_data.timestamp))
 
     def _run_sim(self):
-        q = messaging.q_simulation.get_consumer()
         q_processing = messaging.q_processing.get_consumer()
         while self._is_running:
-            sim_data_bytes = q.get()
-            sim_data: SimData = SimData.from_bytes(sim_data_bytes)
+            data: ProcessedData = q_processing.get()
 
-            # rgb_image = sim_data.camera_data.rgb_image
-            # TODO: figure out another to add path and intersection
-            processed_data: ControllerData = q_processing.get()
-            rgb_image = processed_data.image
-            # --------------------------------------------------------------------
+            qsim_data = QSimData(data=data)
+            qsim_data.processed_rgb_qimage = npimage2qimage(data.debug_image)
+            qsim_data.processed_depth_qimage = depth2qimage(data.depth)
 
-            qimage = __class__.ndarray2qimage(rgb_image)
-            self.data_ready.emit((qimage, sim_data.camera_data.render_enqueued_unix_timestamp))
-
-    @staticmethod
-    def ndarray2qimage(arr: np.ndarray[Any, np.dtype[np.uint8]]):
-        height, width, channel = arr.shape
-        bytes_per_line = channel * width
-        return QImage(arr.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            self.simulation_data_ready.emit(qsim_data)
 
     def stop(self):
         self._is_running = False

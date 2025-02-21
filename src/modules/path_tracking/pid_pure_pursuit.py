@@ -15,8 +15,10 @@ class PurePursuit:
         self.la_clip_low = UIConfigData.CLIP_LOW
         self.la_clip_high = UIConfigData.CLIP_HIGH
 
-    def get_control(self, waypoints, speed):
+    def get_control(self, waypoints: np.ndarray, speed):
         # Transform waypoints coordinates such that the frame origin is in the rear wheel
+        if waypoints.size == 0:
+            return 0
         waypoints[:, 0] += self.waypoint_shift
         look_ahead_distance = np.clip(self.K_dd * speed, self.la_clip_low, self.la_clip_high)
 
@@ -117,14 +119,14 @@ class PurePursuit:
         return filtered[0]
 
 
-class PIDController:
+class PID:
     def __init__(self, Kp, Ki, Kd):
         self.Kp, self.Ki, self.Kd = Kp, Ki, Kd
         self.last_error = 0
         self.i = 0
 
-    def get_control(self, measurement, set_point, dt):
-        error = set_point - measurement
+    def get_control(self, measured, desired, dt):
+        error = desired - measured
         self.i += error * dt
         d = (error - self.last_error) / dt
         self.last_error = error

@@ -24,8 +24,10 @@ computer vision, control theory, and others, combined in compact package for who
 
 ## TODO
 
-- [ ] move client/server + data structures code into a separate git project, included in the existing ones
+- [x] move client/server + data structures code into a separate git project, included in the existing ones
+- [ ] Make renderer visualize all available data - especially FPS statistics
 - [ ]standardize simulation and physical car communication channel
+- [ ] THE SIMULATION DEPTH DATA IS INCORRECT - EACH PIXEL SHOWS DISTANCE FROM THE PIXEL, NOT FROM CAMERA CENTER
   (TCP vs. UDP with multiple channels for image, fast sensor data, ...)
 - [ ] finish record-playback feature such that:
   - panel with recordings is available, showing:

@@ -30,7 +30,7 @@ from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigPanel
-from modules.ui.data import ImageDataThread, SensorDataThread
+from modules.ui.data import ImageDataThread, QSimData, SensorDataThread
 
 
 class RendererMainWindow(QMainWindow):
@@ -51,7 +51,9 @@ class RendererMainWindow(QMainWindow):
                 pos = json.load(f)
                 screen_geometry = QGuiApplication.primaryScreen().availableGeometry()
                 # If off-screen (e.g. due to monitor change), use default
-                if not screen_geometry.contains(QRect(pos["x"], pos["y"], self.width(), self.height())):
+                if not screen_geometry.contains(
+                    QRect(pos["x"], pos["y"], self.width(), self.height())
+                ):
                     pos["x"], pos["y"] = 100, 100
                 self.move(pos["x"], pos["y"])
 
@@ -171,13 +173,13 @@ class RendererMainWindow(QMainWindow):
         self.config_panel = ConfigPanel(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.config_panel)
 
-    def update_image_data(self, data):
-        qimage, timestamp = data
-        self.rgb_pixmap.convertFromImage(qimage)
+    def update_simulation_data(self, data):
+        qsim_data: QSimData = data
+        self.rgb_pixmap.convertFromImage(qsim_data.processed_rgb_qimage)
         self.rgb_label.setPixmap(self.rgb_pixmap)
-        # Depth
-        # self.depth_pixmap.convertFromImage(qimage_depth)
-        # self.depth_label.setPixmap(self.depth_pixmap)
+
+        self.depth_pixmap.convertFromImage(qsim_data.processed_depth_qimage)
+        self.depth_label.setPixmap(self.depth_pixmap)
 
     def update_sensor_data(self, data):
         self.plt_encoders.update(data.rleft_encoder, data.rright_encoder)
@@ -189,7 +191,7 @@ class Renderer:
         window = RendererMainWindow()
 
         t_image_data = ImageDataThread()
-        t_image_data.data_ready.connect(window.update_image_data)
+        t_image_data.simulation_data_ready.connect(window.update_simulation_data)
         window.init_complete.connect(t_image_data.start)
 
         t_sensor_data = SensorDataThread()

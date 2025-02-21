@@ -5,7 +5,15 @@ import numpy as np
 import cv2
 
 from datalink.ipc import messaging
-from datalink.data import ControllerData, SimData, RemoteControlData, UIConfigData, ImageParams, Position, Rotation
+from datalink.data import (
+    ProcessedData,
+    SimData,
+    ControlData,
+    UIConfigData,
+    ImageParams,
+    Position,
+    Rotation,
+)
 from modules.controller import DualSense, PurePursuitPIDController
 from modules.path_planning.red_roadmarks import RedRoadmarksPathPlanner, Camera
 
@@ -13,9 +21,11 @@ from modules.path_planning.red_roadmarks import RedRoadmarksPathPlanner, Camera
 from threading import Thread
 from enum import Enum
 
+
 class ControllerType(Enum):
     DUALSENSE = "dualsense"
     REDROADMARKS = "redroadmarks"
+
 
 class Processor(Process):
     def __init__(self, controller: ControllerType):
@@ -74,7 +84,7 @@ class Processor(Process):
         # receives and sends messages between them and updates their settings accordingly
         # This will be done by registering callbacks that will be called upon message receive from
         # a given interface
-        # Message should be confirmed by the receiver upon delivery with an ACK message 
+        # Message should be confirmed by the receiver upon delivery with an ACK message
         def ui_update():
             q_ui = messaging.q_ui.get_consumer()
             while True:
@@ -87,19 +97,29 @@ class Processor(Process):
         # --------------------------------------------------------------
 
         # TODO: precalculate UV (image coordinates) for all points on the road
-        def draw_data_to_image(image, path, intersections, roadmarks) -> np.ndarray:
+        # TODO: remove None checks - should be empty arrays for more clarity
+        def draw_debug_data(image, path, planner, controller) -> np.ndarray:
             image_copy = image.copy()
+            intersections = controller.pure_pursuit.filtered_intersections
+            roadmarks = planner.roadmarks_imageframe
             path_uv = [planner.camera.xyz_roadframe_iso88552uv(np.array([*xy, 0])) for xy in path]
-            intersections_uv = [planner.camera.xyz_roadframe_iso88552uv(np.array([*xy, 0])) for xy in intersections] if intersections else None
+            intersections_uv = (
+                [
+                    planner.camera.xyz_roadframe_iso88552uv(np.array([*xy, 0]))
+                    for xy in intersections
+                ]
+                if intersections
+                else None
+            )
             for i in range(len(path_uv) - 1):
                 uv1 = path_uv[i]
                 uv2 = path_uv[i + 1]
                 cv2.line(image_copy, uv1, uv2, (0, 255, 0), 2)
-                
+
             if roadmarks:
                 for u, v in roadmarks:
                     cv2.circle(image_copy, (u, v), 5, (0, 255, 0), -1)
-                
+
             if intersections_uv:
                 for u, v in intersections_uv:
                     cv2.circle(image_copy, (u, v), 5, (255, 255, 255), -1)
@@ -114,18 +134,39 @@ class Processor(Process):
                     )
             return image_copy
 
+        # TODO: clean up to some other place
+        def compute_radial_dist(width: int, height: int):
+            radial_dist = np.zeros((height, width), dtype=np.float32)
+            h, w = radial_dist.shape
+            center_x, center_y = w // 2, h // 2
+            for y in range(h):
+                for x in range(w):
+                    dx = x - center_x
+                    dy = y - center_y
+                    radial_dist[y, x] = dx**2 + dy**2
+            return radial_dist
+
+        RADIAL_DIST = compute_radial_dist(width=640, height=480)
+
+        def depth_from_image_center(depth: np.ndarray):
+            """The depth values returned by the UE5 simulation contain scene depth
+            which is measured from each individual pixel to the point it is capturing.
+            This method calculates distance from the image center, which corresponds
+            to the camera location inside the simulation
+            """
+            return np.sqrt(RADIAL_DIST + depth.astype(np.float32) ** 2)
+
         while True:
-            sim_data: SimData = SimData.from_bytes(q_simulation.get())
-            path = planner.plan(sim_data.camera_data.rgb_image)
-            set_speed, set_steering_angle = controller.get_inputs(
-                path=path, speed_cmps=sim_data.vehicle_data.speed, dt=sim_data.dt
-            )
-            
-            updated_image = draw_data_to_image(sim_data.camera_data.rgb_image, path, controller.pure_pursuit.filtered_intersections, planner.roadmarks_imageframe)
-            controller_data = ControllerData(image=updated_image)
-            q_processing.put(controller_data)
-            
-            remote_control_data = RemoteControlData(
-                timestamp=time_ns(), set_speed=set_speed, set_steering_angle=-set_steering_angle
-            )
-            q_control.put(remote_control_data)
+            data: SimData = SimData.from_bytes(q_simulation.get())
+
+            path = planner.plan(data.camera.rgb_image)
+            controller.update(path=path, v=data.vehicle.speed, dt=data.dt)
+
+            c_data = ControlData(timestamp=controller.timestamp, v=controller.v, sa=-controller.sa)
+            q_control.put(c_data)
+
+            # TODO: should be done by simulation/car
+            depth = depth_from_image_center(data.camera.depth_image)
+            debug_image = draw_debug_data(data.camera.rgb_image, path, planner, controller)
+            p_data = ProcessedData(debug_image=debug_image, depth=depth, original=data)
+            q_processing.put(p_data)

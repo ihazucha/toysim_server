@@ -6,6 +6,11 @@ from pathlib import Path
 
 from datalink.data import Position, Rotation, ImageParams
 
+# TODO: check for polyfit properly
+import warnings
+warnings.simplefilter('ignore', np.RankWarning)
+
+# TODO: find another place for camera
 class Camera:
     def __init__(self, position: Position, rotation: Rotation, img_params: ImageParams):
         self.position = position
@@ -28,7 +33,8 @@ class Camera:
 
         self.road_normal_camera_frame = self.R_rc @ np.array([0, 1, 0])
 
-        self.calc_or_load_xy_roadframe_iso8855()
+        self.xy_roadframe_iso8855 = self.calc_or_load_xy_roadframe_iso8855()
+        self.xyz_camframe = self.calc_or_load_xyz_camframe()
 
     def intrinsic_matrix(self) -> np.ndarray:
         fov = np.deg2rad(self.img_params.fov_deg)
@@ -57,14 +63,32 @@ class Camera:
         )
 
     def calc_or_load_xy_roadframe_iso8855(self):
-        file_name = Path(__file__).parent / f"cache_xy_roadframe_iso8855_{self.img_params.width}x{self.img_params.height}_fov{self.img_params.fov_deg}.npy"
+        w, h, fov_deg = self.img_params.width, self.img_params.height, self.img_params.fov_deg
+        file_name = f"cache_xy_roadframe_iso8855_{w}x{h}_fov{fov_deg}.npy"
+        file_path = Path(__file__).parent / file_name
+        xy_roadframe_iso8855 = None
         try:
-            self.xy_roadframe_iso8855 = np.load(file_name)
-            print(f"Loaded cached data from {file_name}")
+            xy_roadframe_iso8855 = np.load(file_path)
+            print(f"Loaded cached data from {file_path}")
         except FileNotFoundError:
-            self.xy_roadframe_iso8855 = self.image2xy_roadframe_iso8855()
-            np.save(file_name, self.xy_roadframe_iso8855)
-            print(f"Saved cache data to {file_name}")
+            xy_roadframe_iso8855 = self.image2xy_roadframe_iso8855()
+            np.save(file_path, xy_roadframe_iso8855)
+            print(f"Saved cache data to {file_path}")
+        return xy_roadframe_iso8855
+
+    def calc_or_load_xyz_camframe(self):
+        w, h, fov_deg = self.img_params.width, self.img_params.height, self.img_params.fov_deg
+        file_name = f"cache_xy_camframe_{w}x{h}_fov{fov_deg}.npy"
+        file_path = Path(__file__).parent / file_name
+        xyz_camframe = None
+        try:
+            xyz_camframe = np.load(file_path)
+            print(f"Loaded cached data from {file_path}")
+        except FileNotFoundError:
+            xyz_camframe = self.image2xyz_camframe()
+            np.save(file_path, xyz_camframe)
+            print(f"Saved cache data to {file_path}")
+        return xyz_camframe
 
     def cam2road(self, vec: np.ndarray) -> np.ndarray:
         return (self.R_cr @ vec) + self.T_cr
@@ -109,7 +133,14 @@ class Camera:
                 x, y, _ = self.uv2xyz_roadframe_iso8855(u, v)
                 xy[u, v] = x, y
         return xy
-
+    
+    def image2xyz_camframe(self) -> np.ndarray:
+        xyz = np.zeros((self.img_params.width, self.img_params.height, 3))
+        for u in range(self.img_params.width):
+            for v in range(self.img_params.height):
+                xyz[u, v, :2] = self.uv2xyz_camframe(u, v)[:2]
+        return xyz
+    
     def v_threshold_by_distance(self, distance: float):
         road_point_road_frame = np.array([0, 0, distance, 1])
         road_point_cam_frame = self.H_rc @ road_point_road_frame

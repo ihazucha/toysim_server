@@ -13,10 +13,3 @@ DEFAULT_ENV = Environment.SIM
 
 if ENV is None:
     ENV = DEFAULT_ENV
-
-# -----------------------------------------------
-
-
-def pdebug(msg: str):
-    if DEBUG:
-        pdebug(msg)
