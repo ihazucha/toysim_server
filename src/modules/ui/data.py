@@ -19,16 +19,14 @@ class QSimData:
         self.processed_depth_qimage: QImage = None
 
 
-# TODO: make more explicit what is the format of this image
 def npimage2qimage(npimage: np.ndarray[Any, np.dtype[np.uint8]]):
-    height, width, channel = npimage.shape
-    bytes_per_line = channel * width
-    return QImage(npimage.data, width, height, bytes_per_line, QImage.Format_RGB888)
+    h, w, channels = npimage.shape
+    return QImage(npimage.data, w, h, channels * w, QImage.Format_RGB888)
 
 
 def depth2qimage(depth: np.ndarray) -> QImage:
     depth_colormap = depth_to_colormap(depth)
-    h, w = depth_colormap.shape[1], depth_colormap.shape[0]
+    w, h, _ = depth_colormap.shape
     return QImage(depth_colormap.data, h, w, QImage.Format_BGR888)
 
 
