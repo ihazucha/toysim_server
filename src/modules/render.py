@@ -2,14 +2,13 @@ import sys
 import json
 from pathlib import Path
 from PySide6.QtCore import Signal, Qt, QRect
-from PySide6.QtGui import QGuiApplication, QPixmap, QIcon, QResizeEvent
+from PySide6.QtGui import QGuiApplication, QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
     QSpacerItem,
-    QLabel,
     QWidget,
     QSizePolicy,
     QTabWidget,
@@ -23,6 +22,7 @@ from modules.ui.plots import (
     SpeedPlotWidget,
     SteeringPlotWidget,
 )
+from modules.ui.plots import LatencyPlot
 
 from utils.paths import icon_path
 
@@ -31,6 +31,30 @@ from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigPanel
 from modules.ui.data import ImageDataThread, QSimData, SensorDataThread
+
+
+class FitGraphicsView(QGraphicsView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setScene(QGraphicsScene(self))
+        self.pixmap_item = QGraphicsPixmapItem()
+        self.scene().addItem(self.pixmap_item)
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def set_pixmap(self, pixmap):
+        """Set the pixmap and fit it to the view."""
+        self.pixmap_item.setPixmap(pixmap)
+        if not pixmap.isNull():
+            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        """Scale the pixmap when the view is resized."""
+        if not self.pixmap_item.pixmap().isNull():
+            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        super().resizeEvent(event)
 
 
 class RendererMainWindow(QMainWindow):
@@ -56,12 +80,19 @@ class RendererMainWindow(QMainWindow):
                 ):
                     pos["x"], pos["y"] = 100, 100
                 self.move(pos["x"], pos["y"])
+                if "width" in pos and "height" in pos:
+                    self.resize(pos["width"], pos["height"])
+                if pos.get("isMaximized", False):
+                    self.showMaximized()
 
     def save_window_position(self):
         pos = {"x": self.x(), "y": self.y()}
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        pos["width"] = self.width()
+        pos["height"] = self.height()
+        pos["isMaximized"] = self.isMaximized()
         with open(self.settings_path, "w") as f:
-            json.dump(pos, f)
+            json.dump(pos, f, indent=4)
 
     def init(self):
         self._init_main_window()
@@ -108,23 +139,32 @@ class RendererMainWindow(QMainWindow):
             self.record_sidebar.show()
 
     def _init_tabs(self):
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabsClosable(False)
-        self.tab_widget.setMovable(True)
-        self.tab_widget.setDocumentMode(True)
-        self.tab_widget.setTabPosition(QTabWidget.North)
-        self.tab_widget.setFocusPolicy(Qt.StrongFocus)
-        self.tab_widget.setFocus()
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(False)
+        self.tabs.setMovable(True)
+        self.tabs.setDocumentMode(True)
+        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setFocusPolicy(Qt.StrongFocus)
+        self.tabs.setFocus()
 
         self.tab1 = QWidget()
         self.tab2 = QWidget()
 
-        self.tab_widget.addTab(self.tab1, "Main Layout")
-        self.tab_widget.addTab(self.tab2, "Custom Layout")
+        self.tabs.addTab(self.tab1, "Main Layout")
+        self.tabs.addTab(self.tab2, "Custom Layout")
 
-        self.setCentralWidget(self.tab_widget)
+        self.setCentralWidget(self.tabs)
 
     def _init_layout(self):
+        self._init_tab1_layout()
+        self._init_tab2_layout()
+        self.setStyleSheet(
+            """
+            background-color: #2d2a2e;
+            """
+        )
+
+    def _init_tab1_layout(self):
         imu_layout = QVBoxLayout()
         imu_layout.addWidget(self.map_plot, stretch=1)
         imu_layout.addWidget(self.imu_plot, stretch=1)
@@ -138,24 +178,26 @@ class RendererMainWindow(QMainWindow):
         # left_layout.addLayout(encoders_layout)
 
         middle_layout = QVBoxLayout()
-        middle_layout.addWidget(self.rgb_graphics_view)
-        middle_layout.addWidget(self.depth_graphics_view)
+        middle_layout.addWidget(self.rgb_graphics_view, stretch=1)
+        middle_layout.addWidget(self.depth_graphics_view, stretch=1)
 
         right_layout = QVBoxLayout()
-        right_layout.addWidget(self.speed_plot)
-        right_layout.addWidget(self.steering_plot)
+        right_layout.addWidget(self.speed_plot, stretch=1)
+        right_layout.addWidget(self.steering_plot, stretch=1)
 
         main_layout = QHBoxLayout()
-        main_layout.addLayout(left_layout)
-        main_layout.addLayout(middle_layout)
-        main_layout.addLayout(right_layout)
+        main_layout.addLayout(left_layout, stretch=1)
+        main_layout.addLayout(middle_layout, stretch=1)
+        main_layout.addLayout(right_layout, stretch=1)
 
         self.tab1.setLayout(main_layout)
-        self.setStyleSheet(
-            """
-            background-color: #2d2a2e;
-            """
-        )
+    
+    def _init_tab2_layout(self):
+        self.processor_dt_plot = LatencyPlot("Processor")
+        layout = QVBoxLayout()
+        layout.addWidget(self.processor_dt_plot)
+        layout.addWidget(self.processor_dt_plot.get_histogram_widget())
+        self.tab2.setLayout(layout)
 
     def _init_main_window(self):
         self.setWindowTitle("ToySim UI")
@@ -173,83 +215,52 @@ class RendererMainWindow(QMainWindow):
         self.record_sidebar.close()
 
     def _init_camera_rgb(self):
-        self.rgb_graphics_view = QGraphicsView(self)
-        self.rgb_graphics_scene = QGraphicsScene(self)
-        self.rgb_graphics_view.setScene(self.rgb_graphics_scene)
-        # Create a QGraphicsPixmapItem to hold the image
-        self.rgb_pixmap_item = QGraphicsPixmapItem()
-        self.rgb_graphics_scene.addItem(self.rgb_pixmap_item)
-
-        # Configure the view for smooth scaling and no scrollbars
-        self.rgb_graphics_view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.rgb_graphics_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.rgb_graphics_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # Allow the view to expand with the window
-        self.rgb_graphics_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
+        self.rgb_graphics_view = FitGraphicsView(self)
+        self.rgb_graphics_view.setMinimumSize(0, 0)
 
     def _init_camera_depth(self):
-        self.depth_graphics_view = QGraphicsView(self)
-        self.depth_graphics_scene = QGraphicsScene(self)
-        self.depth_graphics_view.setScene(self.depth_graphics_scene)
-        # Create a QGraphicsPixmapItem to hold the image
-        self.depth_pixmap_item = QGraphicsPixmapItem()
-        self.depth_graphics_scene.addItem(self.depth_pixmap_item)
-
-        # Configure the view for smooth scaling and no scrollbars
-        self.depth_graphics_view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.depth_graphics_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.depth_graphics_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        # Allow the view to expand with the window
-        self.depth_graphics_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-    def fit_pixmap_to_view(self):
-        """Scale the pixmap to fit the view while keeping the aspect ratio."""
-        if not self.rgb_pixmap_item.pixmap().isNull():
-            self.rgb_graphics_view.fitInView(self.rgb_pixmap_item, Qt.KeepAspectRatio)
-        if not self.depth_pixmap_item.pixmap().isNull():
-            self.depth_graphics_view.fitInView(self.rgb_pixmap_item, Qt.KeepAspectRatio)
-
-    def resizeEvent(self, event):
-        """Handle window resizing by scaling the pixmap."""
-        self.fit_pixmap_to_view()
-        super().resizeEvent(event)
+        self.depth_graphics_view = FitGraphicsView(self)
+        self.depth_graphics_view.setMinimumSize(0, 0)
 
     def _init_speed_plot(self):
         self.speed_plot = SpeedPlotWidget()
-        # self.speed_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.speed_plot.setMinimumSize(0, 0)
+        self.speed_plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _init_steering_plot(self):
         self.steering_plot = SteeringPlotWidget()
-        # self.steering_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.steering_plot.setMinimumSize(0, 0)
+        self.steering_plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _init_map_plot(self):
         self.map_plot = MapPlotWidget()
-        # self.map_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.map_plot.setMinimumSize(0, 0)
+        self.map_plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _init_imu_plot(self):
         self.imu_plot = IMUPlotWidget()
-        # self.imu_plot.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.imu_plot.setMinimumSize(0, 0)
+        self.imu_plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _init_plt_encoders(self):
         self.plt_encoders = EncodersPlotWidget()
-        # self.plt_encoders.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.plt_encoders.setMinimumSize(0, 0)
+        self.plt_encoders.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def _init_config_panel(self):
         self.config_panel = ConfigPanel(self)
         self.addDockWidget(Qt.RightDockWidgetArea, self.config_panel)
         self.config_panel.close()
 
-    def update_simulation_data(self, data):
-        qsim_data: QSimData = data
-        depth_pixmap = QPixmap.fromImage(qsim_data.processed_rgb_qimage)
-        self.rgb_pixmap_item.setPixmap(depth_pixmap)
+    def update_simulation_data(self, data: QSimData):
+        rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
+        self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
-        depth_pixmap = QPixmap.fromImage(qsim_data.processed_depth_qimage)
-        self.depth_pixmap_item.setPixmap(depth_pixmap)
-        self.fit_pixmap_to_view()
+        depth_pixmap = QPixmap.fromImage(data.depth_qimage)
+        self.depth_graphics_view.set_pixmap(depth_pixmap)
+
+        self.processor_dt_plot.update(data.raw.dt)
+        
 
     def update_sensor_data(self, data):
         self.plt_encoders.update(data.rleft_encoder, data.rright_encoder)

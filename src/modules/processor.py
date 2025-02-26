@@ -90,6 +90,7 @@ class Processor(Process):
             while True:
                 new_config = q_ui.get()
                 self._last_controller_config = new_config
+                print(new_config)
                 controller.update_config(new_config)
 
         t_ui_update = Thread(target=ui_update, daemon=True)
@@ -156,9 +157,13 @@ class Processor(Process):
             """
             return np.sqrt(RADIAL_DIST + depth.astype(np.float32) ** 2)
 
+        # Wait for first data
+        # _ = SimData.from_bytes(q_simulation.get())
+        
+        t_last = time_ns()
         while True:
             data: SimData = SimData.from_bytes(q_simulation.get())
-
+            # print(f"{data.dt}")
             path = planner.plan(data.camera.rgb_image)
             controller.update(path=path, v=data.vehicle.speed, dt=data.dt)
 
@@ -168,5 +173,8 @@ class Processor(Process):
             # TODO: should be done by simulation/car
             depth = depth_from_image_center(data.camera.depth_image)
             debug_image = draw_debug_data(data.camera.rgb_image, path, planner, controller)
-            p_data = ProcessedData(debug_image=debug_image, depth=depth, original=data)
+            t = time_ns()
+            p_data = ProcessedData(dt=(t-t_last)/1e6, debug_image=debug_image, depth=depth, original=data)
+            t_last = t
             q_processing.put(p_data)
+

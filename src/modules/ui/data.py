@@ -13,10 +13,10 @@ from cv2 import imdecode, IMREAD_COLOR
 
 
 class QSimData:
-    def __init__(self, data: ProcessedData):
-        self.data: ProcessedData = data
-        self.processed_rgb_qimage: QImage = None
-        self.processed_depth_qimage: QImage = None
+    def __init__(self, processed_data: ProcessedData):
+        self.raw = processed_data
+        self.rgb_qimage: QImage = None
+        self.depth_qimage: QImage = None
 
 
 def npimage2qimage(npimage: np.ndarray[Any, np.dtype[np.uint8]]):
@@ -65,9 +65,9 @@ class ImageDataThread(QThread):
         while self._is_running:
             data: ProcessedData = q_processing.get()
 
-            qsim_data = QSimData(data=data)
-            qsim_data.processed_rgb_qimage = npimage2qimage(data.debug_image)
-            qsim_data.processed_depth_qimage = depth2qimage(data.depth)
+            qsim_data = QSimData(processed_data=data)
+            qsim_data.rgb_qimage = npimage2qimage(data.debug_image)
+            qsim_data.depth_qimage = depth2qimage(data.depth)
 
             self.simulation_data_ready.emit(qsim_data)
 

@@ -22,6 +22,11 @@ computer vision, control theory, and others, combined in compact package for who
 
 ---
 
+## TODO: BUGS
+
+- [ ] When TcpConnection_BP has tick time set to 0.5s - the connection will be made but no data will be passed for some reason
+- [ ] Algo config panel starts with different data than processor is configured with
+
 ## TODO
 
 - [x] move client/server + data structures code into a separate git project, included in the existing ones

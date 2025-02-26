@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D
 
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen, mkBrush
+import pyqtgraph as pg
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
 from datalink.data import EncoderData, Rotation
@@ -32,6 +33,225 @@ STEP_TICKS = [STEP_MAJOR_TICKS, STEP_MINOR_TICKS]
 
 # TODO: send encoder angle in deg as well
 ENCODER_RAW2DEG = 360 / 4096
+
+
+class LatencyPlot(PlotWidget):
+    def __init__(self, name: str):
+        super().__init__()
+        self.setXRange(-DATA_QUEUE_SIZE, 0)
+        self.getAxis("bottom").setTicks(STEP_TICKS)
+        self.getPlotItem().showGrid(x=True, y=True)
+        self.getPlotItem().setTitle(f"{name} dt")
+        self.getPlotItem().setLabel("left", "dt [ms]")
+        self.getPlotItem().setLabel("bottom", f"steps [n]")
+        
+        self.thresh_60fps = 1000/60.0
+        self.thresh_30fps = 1000/30.0
+        self.thresh_15fps = 1000/15.0
+        
+        # Data queue for latency values
+        self.dt_q = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
+        
+        # Add legend
+        self.getPlotItem().addLegend()
+        
+        # Main latency curve
+        self.dt_plot = self.plot(
+            PLOT_TIME_STEPS,
+            self.dt_q,
+            pen=mkPen(QColor(0, 255, 0, 255), style=Qt.SolidLine),
+            name="Current",
+        )
+        
+        # Moving average curve
+        self.window_size = 10  # 10-point moving average
+        self.ma_values = np.zeros(DATA_QUEUE_SIZE - self.window_size + 1)
+        self.ma_plot = self.plot(
+            PLOT_TIME_STEPS[-(len(self.ma_values)):],
+            self.ma_values,
+            pen=mkPen(QColor(255, 165, 0, 200), style=Qt.SolidLine, width=2),
+            name="Avg (10pt)"
+        )
+        
+        # Current value highlight
+        self.dt_plot_last_value = ScatterPlotItem(size=8, pen=mkPen(None), brush="w")
+        self.dt_plot_last_value.setZValue(2)
+        self.addItem(self.dt_plot_last_value)
+        
+        # Performance threshold lines
+        self.thresh_line_60fps = pg.InfiniteLine(
+            angle=0, 
+            pen=mkPen('g', width=1.5, style=Qt.DashLine), 
+            movable=False, 
+            label=f"{self.thresh_60fps:.1f}ms (60 FPS)",
+            labelOpts={'position': 0.95, 'color': (255, 255, 0), 'movable': True}
+        )
+        self.thresh_line_60fps.setValue(self.thresh_60fps)
+        self.addItem(self.thresh_line_60fps)
+        
+        self.thresh_line_30fps = pg.InfiniteLine(
+            angle=0, 
+            pen=mkPen('y', width=1.5, style=Qt.DashLine), 
+            movable=False,
+            label=f"{self.thresh_30fps:.1f}ms (30 FPS)",
+            labelOpts={'position': 0.95, 'color': (255, 0, 0), 'movable': True}
+        )
+        self.thresh_line_30fps.setValue(self.thresh_30fps)
+        self.addItem(self.thresh_line_30fps)
+
+        self.thresh_line_15fps = pg.InfiniteLine(
+            angle=0, 
+            pen=mkPen('r', width=1.5, style=Qt.DashLine), 
+            movable=False,
+            label=f"{self.thresh_15fps:.1f}ms (15 FPS)",
+            labelOpts={'position': 0.95, 'color': (255, 0, 0), 'movable': True}
+        )
+        self.thresh_line_15fps.setValue(self.thresh_15fps)
+        self.addItem(self.thresh_line_15fps)
+        
+        # Reference lines for statistics
+        self.mean_line = pg.InfiniteLine(
+            angle=0, 
+            pen=mkPen(QColor(255, 255, 255, 150), style=Qt.DotLine), 
+            movable=False
+        )
+        self.addItem(self.mean_line)
+        
+        self.max_line = pg.InfiniteLine(
+            angle=0, 
+            pen=mkPen(QColor(255, 100, 100, 150), style=Qt.DotLine), 
+            movable=False
+        )
+        self.addItem(self.max_line)
+        
+        # Statistics text display
+        self.stats_text = pg.TextItem(
+            html="", 
+            anchor=(0, 0),
+            fill=QColor(20, 20, 20, 120)
+        )
+        self.stats_text.setPos(-DATA_QUEUE_SIZE + 5, 10)
+        self.addItem(self.stats_text)
+        
+        # Auto-scaling
+        self.auto_scale = True
+        self.auto_scale_buffer = 1.2  # 20% buffer
+        self.setMinimumHeight(150)
+        
+        # Set initial Y range
+        self.setYRange(0, self.thresh_15fps * 1.5)
+        
+        # Initialize histogram as a separate widget
+        self.histogram = pg.PlotWidget()
+        self.histogram.setMaximumHeight(120)
+        self.histogram.setLabel('bottom', 'dt [ms]')
+        self.histogram.setLabel('left', 'Count')
+        self.histogram.showGrid(x=True, y=True)
+        self.histogram_plot = self.histogram.plot(
+            pen=None,
+            stepMode='center',
+            fillLevel=0,
+            fillBrush=QBrush(QColor(0, 255, 255, 120))
+        )
+
+    def update(self, dt: float):
+        # Update the data
+        self.dt_q.append(dt)
+        
+        # Update main plot
+        self.dt_plot.setData(PLOT_TIME_STEPS, self.dt_q)
+        
+        # Update current point highlight with color based on performance
+        if dt > self.thresh_15fps:
+            highlight_color = QColor(255, 0, 0, 200)  # Red for critical
+        elif dt > self.thresh_60fps:
+            highlight_color = QColor(255, 255, 0, 200)  # Yellow for warning
+        else:
+            highlight_color = QColor(0, 255, 0, 200)  # Green for good
+        
+        self.dt_plot_last_value.setBrush(highlight_color)
+        self.dt_plot_last_value.setData([PLOT_TIME_STEPS[-1]], [dt])
+        
+        # Calculate statistics
+        dt_array = np.array(self.dt_q)
+        mean_dt = np.mean(dt_array)
+        max_dt = np.max(dt_array)
+        min_dt = np.min(dt_array)
+        std_dt = np.std(dt_array)
+        
+        # Update statistics lines
+        self.mean_line.setValue(mean_dt)
+        self.max_line.setValue(max_dt)
+        
+        # Calculate moving average
+        if len(self.dt_q) >= self.window_size:
+            self.ma_values = np.convolve(
+                dt_array, 
+                np.ones(self.window_size)/self.window_size, 
+                mode='valid'
+            )
+            ma_x = PLOT_TIME_STEPS[-(len(self.ma_values)):]
+            self.ma_plot.setData(ma_x, self.ma_values)
+        
+        # Update statistics text
+        # Determine performance category using all thresholds
+        if dt <= self.thresh_60fps:
+            current_perf = "60"
+        elif dt <= self.thresh_30fps:
+            current_perf = "30"
+        elif dt <= self.thresh_15fps:
+            current_perf = "15"
+        else:
+            current_perf = "15"
+        color_map = {"60": "green", "30": "yellow", "15": "red"}
+        
+        self.stats_text.setHtml(
+            f"""
+            <div style='background-color: rgba(20, 20, 20, 120); padding: 0px; border-radius: 3px;'>
+                <table style='font-family: monospace; border-collapse: collapse; width: 100%;'>
+                    <tr style='font-weight: bold;'>
+                        <td>Current:&nbsp;</td>
+                        <td style='color: {color_map[current_perf]}'>{dt:.2f}ms</td>
+                    </tr>
+                    <tr style='color: white;'>
+                        <td>Mean</td>
+                        <td>{mean_dt:.2f}ms</td>
+                    </tr>
+                    <tr style='color: white;'>
+                        <td>Max</td>
+                        <td>{max_dt:.2f}ms</td>
+                    </tr>
+                    <tr style='color: white;'>
+                        <td>Min</td>
+                        <td>{min_dt:.2f}ms</td>
+                    </tr>
+                    <tr style='color: white;'>
+                        <td>Std</td>
+                        <td>{std_dt:.2f}ms</td>
+                    </tr>
+                </table>
+            </div>
+            """
+        )
+        
+        # Auto-scale Y-axis if enabled and needed
+        if self.auto_scale:
+            max_needed = max(max_dt, self.thresh_15fps) * self.auto_scale_buffer
+            current_min, current_max = self.viewRange()[1]
+            if max_needed > current_max or max_needed < current_max * 0.7:
+                self.setYRange(0, max_needed)
+        
+        # Update histogram
+        y, x = np.histogram(self.dt_q, bins=np.linspace(0, max(max_dt * 1.2, self.thresh_15fps * 1.2), 40))
+        self.histogram_plot.setData(x, y)
+    
+    def toggle_auto_scale(self):
+        self.auto_scale = not self.auto_scale
+        return self.auto_scale
+    
+    def get_histogram_widget(self):
+        """Returns the histogram widget for placement in layouts"""
+        return self.histogram
 
 
 class SpeedPlotWidget(PlotWidget):
@@ -87,7 +307,7 @@ class SteeringPlotWidget(PlotWidget):
 
         self.steering_deque = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
         self.set_steering_deque = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        
+
         self.steering_plot = self.plot(
             self.steering_deque,
             PLOT_TIME_STEPS,
@@ -148,8 +368,6 @@ class MapPlotWidget(PlotWidget):
         self.x_deque.append(x)
         self.y_deque.append(y)
         self.path.setData(list(self.x_deque), list(self.y_deque))
-
-
 
 
 class IMUPlotWidget(GLViewWidget):
@@ -232,7 +450,6 @@ class IMUPlotWidget(GLViewWidget):
         self.arrow_x.setTransform(R)
         self.arrow_y.setTransform(R)
         self.arrow_z.setTransform(R)
-
 
 
 class EncodersPlotWidget(PlotWidget):

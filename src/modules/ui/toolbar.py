@@ -1,5 +1,5 @@
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QToolBar, QWidget, QStyle, QWidgetAction, QSizePolicy
+from PySide6.QtWidgets import QToolBar, QWidget, QStyle, QWidgetAction, QHBoxLayout, QSpacerItem, QSizePolicy
 from PySide6.QtGui import QIcon, QAction
 
 from utils.paths import icon_path
