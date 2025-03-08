@@ -1,5 +1,5 @@
 from pydualsense import pydualsense
-from datalink.data import UIConfigData
+from datalink.data import PurePursuitPIDConfig
 from modules.path_tracking.pid_pure_pursuit import PID, PurePursuit
 
 from time import time_ns
@@ -58,24 +58,23 @@ class DualSense(Controller):
             self._dualsense.close()
 
 
-class PurePursuitPIDController(Controller):
-    def __init__(self, pure_pursuit=PurePursuit(), pid=PID(Kp=1.5, Ki=0, Kd=0)):
+class PurePursuitPID(Controller):
+    def __init__(self, config: PurePursuitPIDConfig):
         super().__init__()
-        self.pure_pursuit = pure_pursuit
-        self.pid = pid
-        # TODO: instead of UIConfigData, create an interface and send this during initialisation
-        self.v_desired = UIConfigData.SET_SPEED
+        self.pp = PurePursuit()
+        self.pid = PID(Kp=1.5, Ki=0, Kd=0)
+        self.set_config(config)
 
-    def update(self, path: np.ndarray, v: float, dt: float):
-        self.v = self.pid.get_control(measured=v, desired=self.v_desired, dt=dt)
-        self.sa = np.rad2deg(self.pure_pursuit.get_control(path, v))
+    def update(self, path: np.ndarray, speed: float, dt: float):
+        self.speed = self.pid.update(measured=speed, desired=self.v_setpoint, dt=dt)
+        self.steering_angle = np.rad2deg(self.pp.get_control(path, speed))
         self.timestamp = time_ns()
 
-    def update_config(self, config: UIConfigData):
-        self.pure_pursuit.K_dd = config.kdd
-        self.pure_pursuit.la_clip_low = config.clip_low
-        self.pure_pursuit.la_clip_high = config.clip_high
-        self.speed_setpoint = config.set_speed
+    def set_config(self, config: PurePursuitPIDConfig):
+        self.pp.lookahead_factor = config.lookahead_factor
+        self.pp.lookahead_l_min = config.lookahead_l_min
+        self.pp.lookahead_l_max = config.lookahead_l_max
+        self.v_setpoint = config.speed_setpoint
 
     def is_alive(self):
         return True

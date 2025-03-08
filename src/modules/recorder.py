@@ -1,5 +1,5 @@
 import struct
-from datalink.ipc import messaging
+from modules.messaging import messaging
 from datalink.data import SimData
 
 

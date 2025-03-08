@@ -29,10 +29,17 @@ computer vision, control theory, and others, combined in compact package for who
 
 ## TODO
 
+ 
+- [ ] general info panel
+  - dt and FPS of the simulation/car
+  - dt and FPS of the UI
+  - delay between the client and UI
+    - current value and history (plot)
 - [x] move client/server + data structures code into a separate git project, included in the existing ones
+- [x] THE SIMULATION DEPTH DATA IS INCORRECT - EACH PIXEL SHOWS DISTANCE FROM THE PIXEL, NOT FROM CAMERA CENTER
+  - [ ] Make this to be done inside of the simulation, rather than in the processor
 - [ ] Make renderer visualize all available data - especially FPS statistics
 - [ ]standardize simulation and physical car communication channel
-- [ ] THE SIMULATION DEPTH DATA IS INCORRECT - EACH PIXEL SHOWS DISTANCE FROM THE PIXEL, NOT FROM CAMERA CENTER
   (TCP vs. UDP with multiple channels for image, fast sensor data, ...)
 - [ ] finish record-playback feature such that:
   - panel with recordings is available, showing:
@@ -51,10 +58,5 @@ computer vision, control theory, and others, combined in compact package for who
     - timeline time ((mili)seconds)
     - timeline frames
     - ability to navigate in timeline fast
-  - general info panel
-    - dt and FPS of the simulation/car
-    - dt and FPS of the UI
-    - delay between the client and UI
-      - current value and history (plot)
 - menu of available controllers
   - controller panel for each controller

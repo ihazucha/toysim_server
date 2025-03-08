@@ -1,26 +1,22 @@
 import numpy as np
 
-from datalink.data import UIConfigData
+from datalink.data import PurePursuitPIDConfig
 
 class PurePursuit:
-    param_K_dd = UIConfigData.KDD
-
-    # The above parameters will be used in the Carla simulation
-    # The simple simulation in tests/control/control.ipynb does not use these parameters
-    def __init__(self, K_dd=param_K_dd, wheel_base=310, waypoint_shift=245):
-        self.K_dd = K_dd
+    def __init__(self, K_dd=PurePursuitPIDConfig.lookahead_factor, wheel_base=310, waypoint_shift=245):
+        self.lookahead_factor = K_dd
         self.wheel_base = wheel_base
         self.waypoint_shift = waypoint_shift
-        self.filtered_intersections = None
-        self.la_clip_low = UIConfigData.CLIP_LOW
-        self.la_clip_high = UIConfigData.CLIP_HIGH
+        self.filtered_intersections = np.array([])
+        self.lookahead_l_min = PurePursuitPIDConfig.lookahead_l_min
+        self.lookahead_l_max = PurePursuitPIDConfig.lookahead_l_max
 
     def get_control(self, waypoints: np.ndarray, speed):
         # Transform waypoints coordinates such that the frame origin is in the rear wheel
         if waypoints.size == 0:
             return 0
         waypoints[:, 0] += self.waypoint_shift
-        look_ahead_distance = np.clip(self.K_dd * speed, self.la_clip_low, self.la_clip_high)
+        look_ahead_distance = np.clip(self.lookahead_factor * speed, self.lookahead_l_min, self.lookahead_l_max)
 
         track_point = self.get_target_point(look_ahead_distance, waypoints)
         if track_point is None:
@@ -125,7 +121,7 @@ class PID:
         self.last_error = 0
         self.i = 0
 
-    def get_control(self, measured, desired, dt):
+    def update(self, measured, desired, dt):
         error = desired - measured
         self.i += error * dt
         d = (error - self.last_error) / dt

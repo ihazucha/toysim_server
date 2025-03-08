@@ -2,22 +2,30 @@ import numpy as np
 import cv2
 
 from typing import Any
+from time import time_ns
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
-from datalink.ipc import messaging
-from utils.env import Environment, ENV
-from datalink.data import ProcessedData, JPGImageData
+from modules.messaging import messaging
+from datalink.data import ProcessedData, JPGImageData, SensorFusionData
 from cv2 import imdecode, IMREAD_COLOR
 
 
 class QSimData:
-    def __init__(self, processed_data: ProcessedData):
-        self.raw = processed_data
+    def __init__(self, raw: ProcessedData):
+        self.raw = raw
         self.rgb_qimage: QImage = None
         self.depth_qimage: QImage = None
+        self.processor_period_ns: float = 0
+        self.processor_dt_ns: float = 0
 
+class QVehicleData:
+    def __init__(self, raw: ProcessedData):
+        self.raw = raw
+        self.rgb_qimage: QImage = None
+        self.processor_period_ns: float = 0
+        self.processor_dt_ns: float = 0
 
 def npimage2qimage(npimage: np.ndarray[Any, np.dtype[np.uint8]]):
     h, w, channels = npimage.shape
@@ -36,57 +44,49 @@ def depth_to_colormap(depth_data: np.ndarray):
     return colormap
 
 
-class ImageDataThread(QThread):
-    simulation_data_ready = Signal(QSimData)
-    data_ready = Signal(tuple)  # TODO: rework for vehicle - refactor to common standard
+class SimDataThread(QThread):
+    data_ready = Signal(QSimData)
 
     def __init__(self):
         super().__init__()
         self._is_running = True
 
     def run(self):
-        if ENV == Environment.VEHICLE:
-            self._run_vehicle()
-        elif ENV == Environment.SIM:
-            self._run_sim()
-        else:
-            raise NotImplementedError(f"No runtime found for ENV={ENV}")
-
-    def _run_vehicle(self):
-        q = messaging.q_image.get_consumer()
-        while self._is_running:
-            jpg_image_data: JPGImageData = q.get()
-            image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
-            qimage = npimage2qimage(image_array)
-            self.data_ready.emit((qimage, jpg_image_data.timestamp))
-
-    def _run_sim(self):
         q_processing = messaging.q_processing.get_consumer()
+        last_put_timestamp = time_ns()
         while self._is_running:
             data: ProcessedData = q_processing.get()
 
-            qsim_data = QSimData(processed_data=data)
+            qsim_data = QSimData(raw=data)
             qsim_data.rgb_qimage = npimage2qimage(data.debug_image)
             qsim_data.depth_qimage = depth2qimage(data.depth)
+            qsim_data.processor_period_ns = q_processing.last_put_timestamp - last_put_timestamp
+            qsim_data.processor_dt_ns = q_processing.last_put_timestamp - data.begin_timestamp
+            last_put_timestamp = q_processing.last_put_timestamp
 
-            self.simulation_data_ready.emit(qsim_data)
+            self.data_ready.emit(qsim_data)
 
     def stop(self):
         self._is_running = False
 
-
-class SensorDataThread(QThread):
-    data_ready = Signal(tuple)
+class VehicleDataThread(QThread):
+    data_ready = Signal(QVehicleData)
 
     def __init__(self):
         super().__init__()
         self._is_running = True
 
     def run(self):
-        q_sensor = messaging.q_sensor.get_consumer()
+        q = messaging.q_sensor_fusion.get_consumer()
         while self._is_running:
-            data = q_sensor.get()
-            self.data_ready.emit(data)
+            sensor_fusion_data = SensorFusionData.from_bytes(q.get())
+            jpg_image_data: JPGImageData = sensor_fusion_data.camera
+            image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
+            qimage = npimage2qimage(image_array)
+            # TODO: replace with processed data if neccesary
+            qvehicle_data = QVehicleData(sensor_fusion_data)
+            qvehicle_data.rgb_qimage = qimage
+            self.data_ready.emit(qvehicle_data)
 
     def stop(self):
         self._is_running = False

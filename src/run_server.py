@@ -18,7 +18,7 @@ def main():
 
     p_network = NetworkServer(server_ip=args.ip)
     p_sim_network = TcpServer(server_ip=args.ip)
-    p_processor = Processor(controller=ControllerType(args.controller))
+    p_processor = Processor(controller_type=ControllerType(args.controller))
     renderer = Renderer()
 
     processes = [

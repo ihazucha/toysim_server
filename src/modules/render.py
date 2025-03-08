@@ -22,7 +22,7 @@ from modules.ui.plots import (
     SpeedPlotWidget,
     SteeringPlotWidget,
 )
-from modules.ui.plots import LatencyPlot
+from modules.ui.plots import LatencyPlotWidget
 
 from utils.paths import icon_path
 
@@ -30,7 +30,7 @@ from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigPanel
-from modules.ui.data import ImageDataThread, QSimData, SensorDataThread
+from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QVehicleData
 
 
 class FitGraphicsView(QGraphicsView):
@@ -193,10 +193,14 @@ class RendererMainWindow(QMainWindow):
         self.tab1.setLayout(main_layout)
     
     def _init_tab2_layout(self):
-        self.processor_dt_plot = LatencyPlot("Processor")
-        layout = QVBoxLayout()
-        layout.addWidget(self.processor_dt_plot)
-        layout.addWidget(self.processor_dt_plot.get_histogram_widget())
+        self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
+        self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
+        layout = QHBoxLayout()
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(self.processor_period_plot)
+        left_layout.addWidget(self.processor_dt_plot)
+        layout.addLayout(left_layout)
+        layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Expanding))
         self.tab2.setLayout(layout)
 
     def _init_main_window(self):
@@ -259,8 +263,15 @@ class RendererMainWindow(QMainWindow):
         depth_pixmap = QPixmap.fromImage(data.depth_qimage)
         self.depth_graphics_view.set_pixmap(depth_pixmap)
 
-        self.processor_dt_plot.update(data.raw.dt)
+        period_ms = data.processor_period_ns / 1e6
+        self.processor_period_plot.update(dt_ms=period_ms)
+        dt_ms = data.processor_dt_ns / 1e6
+        self.processor_dt_plot.update(dt_ms=dt_ms)
         
+    def update_vehicle_data(self, data: QVehicleData):
+        rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
+        self.rgb_graphics_view.set_pixmap(rgb_pixmap)
+        print("Updating vehicle data")
 
     def update_sensor_data(self, data):
         self.plt_encoders.update(data.rleft_encoder, data.rright_encoder)
@@ -271,18 +282,18 @@ class Renderer:
         app = QApplication(sys.argv)
         window = RendererMainWindow()
 
-        t_image_data = ImageDataThread()
-        t_image_data.simulation_data_ready.connect(window.update_simulation_data)
-        window.init_complete.connect(t_image_data.start)
+        t_sim_data = SimDataThread()
+        t_sim_data.data_ready.connect(window.update_simulation_data)
+        window.init_complete.connect(t_sim_data.start)
 
-        t_sensor_data = SensorDataThread()
-        t_sensor_data.data_ready.connect(window.update_sensor_data)
-        window.init_complete.connect(t_sensor_data.start)
+        t_vehicle_data = VehicleDataThread()
+        t_vehicle_data.data_ready.connect(window.update_vehicle_data)
+        window.init_complete.connect(t_vehicle_data.start)
 
         t_rec = RecordingThread()
         window.init_complete.connect(t_rec.start)
 
-        threads = [t_image_data, t_sensor_data, t_rec]
+        threads = [t_sim_data, t_vehicle_data, t_rec]
 
         def stop_threads():
             # TODO: try to exit gracefully instead of terminate

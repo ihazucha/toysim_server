@@ -150,7 +150,7 @@ class Camera:
         return cut_v
 
 
-class RedRoadmarksPathPlanner:
+class RedRoadmarksPlanner:
     def __init__(self, camera: Camera):
         self.camera = camera
 
@@ -162,19 +162,19 @@ class RedRoadmarksPathPlanner:
         self.roadmarks_interp = None
         self.path = None
 
-    def plan(self, rgb_image: np.ndarray) -> np.ndarray:
+    def update(self, rgb_image: np.ndarray):
         self.bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        self.bgr_filtered = RedRoadmarksPathPlanner.red_color_thresh_filter(self.bgr_image)
+        self.bgr_filtered = RedRoadmarksPlanner.red_color_thresh_filter(self.bgr_image)
         self.roadmarks_imageframe = self.find_roadmarks(self.bgr_filtered)
         self.roadmarks = np.array(
             [self.camera.xy_roadframe_iso8855[uv] for uv in self.roadmarks_imageframe]
         )
         if self.roadmarks.size < 2:
             # TODO: think about better approach
-            return self.roadmarks
-        self.roadmarks_interp = RedRoadmarksPathPlanner.interpolate_roadmarks(self.roadmarks)
-        self.path = RedRoadmarksPathPlanner.polyline_fit_path(self.roadmarks_interp)
-        return self.path
+            self.path = self.roadmarks
+            return
+        self.roadmarks_interp = RedRoadmarksPlanner.interpolate_roadmarks(self.roadmarks)
+        self.path = RedRoadmarksPlanner.polyline_fit_path(self.roadmarks_interp)
 
     @staticmethod
     def red_color_thresh_filter(bgr_image):

@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDoubleValidator
 
-from datalink.ipc import messaging
-from datalink.data import UIConfigData
+from modules.messaging import messaging
+from datalink.data import PurePursuitPIDConfig
 
 
 class FloatSlider(QWidget):
@@ -77,7 +77,7 @@ class FloatSlider(QWidget):
 class ConfigPanel(QDockWidget):
     def __init__(self, parent=None):
         super().__init__("Config", parent)
-        self.data = UIConfigData()
+        self.data = PurePursuitPIDConfig()
         self.init_ui()
         self._q_ui = messaging.q_ui.get_producer()
 
@@ -85,18 +85,50 @@ class ConfigPanel(QDockWidget):
         self.config_widget = QWidget()
         self.setWidget(self.config_widget)
 
-        self.speed_control = FloatSlider("set_speed", "Set speed [cm/s]", 0, 2200, 1000, 100, self)
-        self.kdd_control = FloatSlider("kdd", "Lookahead multiplier", 0, 10, 2, 0.05, self)
-        self.clip_low = FloatSlider("clip_low", "Lookahead low [cm]", 0, 10000, 300, 100, self)
-        self.clip_high = FloatSlider("clip_high", "Lookahead high [cm]", 0, 10000, 2000, 100, self)
+        self.speed_setpoint = FloatSlider(
+            "speed_setpoint",
+            "Speed Setpoint [cm/s]",
+            0,
+            2200,
+            PurePursuitPIDConfig.speed_setpoint,
+            100,
+            self,
+        )
+        self.lookahead_factor = FloatSlider(
+            "lookahead_factor",
+            "Lookahead Factor",
+            0,
+            10,
+            PurePursuitPIDConfig.lookahead_factor,
+            0.05,
+            self,
+        )
+        self.lookahead_l_min = FloatSlider(
+            "lookahead_l_min",
+            "Lookahead Dist Max [cm]",
+            0,
+            10000,
+            PurePursuitPIDConfig.lookahead_l_min,
+            100,
+            self,
+        )
+        self.lookahead_l_max = FloatSlider(
+            "lookahead_l_min",
+            "Lookahead Dist Max [cm]",
+            0,
+            10000,
+            PurePursuitPIDConfig.lookahead_l_max,
+            100,
+            self,
+        )
 
         layout = QVBoxLayout()
-        layout.addWidget(self.speed_control)
-        layout.addWidget(self.kdd_control)
-        layout.addWidget(self.clip_low)
-        layout.addWidget(self.clip_high)
+        layout.addWidget(self.speed_setpoint)
+        layout.addWidget(self.lookahead_factor)
+        layout.addWidget(self.lookahead_l_min)
+        layout.addWidget(self.lookahead_l_max)
 
-        layout.addStretch()  # Push everything up
+        layout.addStretch()
         self.config_widget.setLayout(layout)
 
     def update_data(self, key, value):
