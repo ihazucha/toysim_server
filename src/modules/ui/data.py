@@ -1,3 +1,4 @@
+from numbers import Real
 import numpy as np
 import cv2
 
@@ -8,7 +9,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from modules.messaging import messaging
-from datalink.data import ProcessedData, JPGImageData, SensorFusionData
+from datalink.data import ProcessedData, JPGImageData, RealData
 from cv2 import imdecode, IMREAD_COLOR
 
 
@@ -20,8 +21,8 @@ class QSimData:
         self.processor_period_ns: float = 0
         self.processor_dt_ns: float = 0
 
-class QVehicleData:
-    def __init__(self, raw: ProcessedData):
+class QRealData:
+    def __init__(self, raw: RealData):
         self.raw = raw
         self.rgb_qimage: QImage = None
         self.processor_period_ns: float = 0
@@ -70,21 +71,21 @@ class SimDataThread(QThread):
         self._is_running = False
 
 class VehicleDataThread(QThread):
-    data_ready = Signal(QVehicleData)
+    data_ready = Signal(QRealData)
 
     def __init__(self):
         super().__init__()
         self._is_running = True
 
     def run(self):
-        q = messaging.q_sensor_fusion.get_consumer()
+        q = messaging.q_real.get_consumer()
         while self._is_running:
-            sensor_fusion_data = SensorFusionData.from_bytes(q.get())
-            jpg_image_data: JPGImageData = sensor_fusion_data.camera
+            real_data: RealData = RealData.from_bytes(q.get())
+            jpg_image_data: JPGImageData = real_data.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
             qimage = npimage2qimage(image_array)
             # TODO: replace with processed data if neccesary
-            qvehicle_data = QVehicleData(sensor_fusion_data)
+            qvehicle_data = QRealData(real_data)
             qvehicle_data.rgb_qimage = qimage
             self.data_ready.emit(qvehicle_data)
 

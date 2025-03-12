@@ -9,7 +9,7 @@ class RecordWriter:
 
     def write_new(self, record_path: str):
         # TODO: dinstinguish between simulation and real car
-        q = messaging.q_simulation.get_consumer()
+        q = messaging.q_sim.get_consumer()
         self._running = True
         with open(record_path, "wb") as f:
             frame_size = struct.pack("=Q", SimData.SIZE)

@@ -12,7 +12,9 @@ from PySide6.QtWidgets import (
     QWidget,
     QSizePolicy,
     QTabWidget,
-    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, 
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
 )
 
 from modules.ui.plots import (
@@ -30,7 +32,7 @@ from modules.ui.sidebar import RecordSidebar
 from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigPanel
-from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QVehicleData
+from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
 
 
 class FitGraphicsView(QGraphicsView):
@@ -191,7 +193,7 @@ class RendererMainWindow(QMainWindow):
         main_layout.addLayout(right_layout, stretch=1)
 
         self.tab1.setLayout(main_layout)
-    
+
     def _init_tab2_layout(self):
         self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
         self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
@@ -267,14 +269,16 @@ class RendererMainWindow(QMainWindow):
         self.processor_period_plot.update(dt_ms=period_ms)
         dt_ms = data.processor_dt_ns / 1e6
         self.processor_dt_plot.update(dt_ms=dt_ms)
-        
-    def update_vehicle_data(self, data: QVehicleData):
+
+    def update_real_data(self, data: QRealData):
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
-        print("Updating vehicle data")
 
-    def update_sensor_data(self, data):
-        self.plt_encoders.update(data.rleft_encoder, data.rright_encoder)
+        self.speed_plot.update(
+            measured_speed=data.raw.sensor_fusion.avg_speed,
+            target_speed=data.raw.control.speed,
+            engine_power=data.raw.actuators.motor_power,
+        )
 
 
 class Renderer:
@@ -287,7 +291,7 @@ class Renderer:
         window.init_complete.connect(t_sim_data.start)
 
         t_vehicle_data = VehicleDataThread()
-        t_vehicle_data.data_ready.connect(window.update_vehicle_data)
+        t_vehicle_data.data_ready.connect(window.update_real_data)
         window.init_complete.connect(t_vehicle_data.start)
 
         t_rec = RecordingThread()
@@ -296,7 +300,7 @@ class Renderer:
         threads = [t_sim_data, t_vehicle_data, t_rec]
 
         def stop_threads():
-            # TODO: try to exit gracefully instead of terminate
+            # TODO: try to exit gracefully
             [t.terminate() for t in threads]
             [t.wait() for t in threads]
 

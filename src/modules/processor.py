@@ -157,7 +157,7 @@ class Processor(Process):
         controller = PurePursuitPID(config=PurePursuitPIDConfig())
 
         q_control = messaging.q_control.get_producer()
-        q_simulation = messaging.q_simulation.get_consumer()
+        q_simulation = messaging.q_sim.get_consumer()
         q_processing = messaging.q_processing.get_producer()
 
         start_apply_ui_config_thread(controller)

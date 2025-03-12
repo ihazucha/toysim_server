@@ -36,6 +36,12 @@ STEP_TICKS = [STEP_MAJOR_TICKS, STEP_MINOR_TICKS]
 # TODO: send encoder angle in deg as well
 ENCODER_RAW2DEG = 360 / 4096
 
+class PltColors:
+    PLT_BG = QColor(0x1a, 0x1a, 0x1a, 255)
+    STATS_BG = QColor(0x1e, 0x1e, 0x1e, 255)
+    PASTEL_GREEN = QColor(152, 251, 152, 200)
+    PASTEL_ORANGE = QColor(255, 204, 153, 200)
+
 
 class LatencyStatsWidget(QFrame):
     def __init__(self):
@@ -43,8 +49,8 @@ class LatencyStatsWidget(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.setFrameShadow(QFrame.Sunken)
         self.setStyleSheet(
-            """
-            background-color: #1e1e1e;
+            f"""
+            background-color: {PltColors.STATS_BG.name()};
             color: white;
             border-radius: 2px;
             padding: 2px;
@@ -98,7 +104,7 @@ class LatencyPlotWidget(QWidget):
         self.qcolor_tolerance_fill = QColor(152, 251, 152, 16)  # pastel green soft fill
 
         self.w_plot = PlotWidget()
-        self.w_plot.setBackground("#1a1a1a")
+        self.w_plot.setBackground(PltColors.PLT_BG.name())
         self.w_plot.setXRange(-DATA_QUEUE_SIZE, 0)
         self.w_plot.getAxis("bottom").setTicks(STEP_TICKS)
         self.w_plot.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
@@ -138,7 +144,6 @@ class LatencyPlotWidget(QWidget):
         self.w_plot.addItem(self.mean_line)
         self.w_plot_legend.addItem(PlotCurveItem(pen=mean_pen), name=mean_name)
 
-        print(self.dt_ma_xs)
         self.dt_ma_plot = self.w_plot.plot(
             self.dt_ma_xs,
             self.dt_ma_data,
@@ -260,41 +265,53 @@ class SpeedPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
         self.setXRange(-DATA_QUEUE_SIZE, 0)
-        self.setYRange(-200, 200)
         self.getAxis("bottom").setTicks(STEP_TICKS)
-        self.getPlotItem().showGrid(x=True, y=True)
+        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
+        self.setBackground(PltColors.PLT_BG)
         self.getPlotItem().setTitle("Speed")
-        self.getPlotItem().setLabel("left", "Speed [cm/s]")
+        self.getPlotItem().setLabel("left", "Speed [m/s]")
         self.getPlotItem().setLabel("bottom", f"Step [n] (s = {FPS} steps)")
-
-        self.speed_marker = ScatterPlotItem(size=5, pen=mkPen(None), brush="w")
-        self.speed_marker.setZValue(1)
-        self.addItem(self.speed_marker)
         self.getPlotItem().addLegend()
 
-        self.speed_deque = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
-        self.set_speed_deque = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
+        self.dq_speed = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
+        self.dq_set_speed = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
+        self.dq_engine_power = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
 
-        self.speed_plot = self.plot(
+        self.plt_speed = self.plot(
             PLOT_TIME_STEPS,
-            self.speed_deque,
-            pen=mkPen(QColor(0, 255, 0, 255), style=Qt.SolidLine),
-            name="Value",
+            self.dq_speed,
+            pen=mkPen(PltColors.PASTEL_GREEN, style=Qt.SolidLine),
+            name="Current speed",
         )
-        self.set_speed_plot = self.plot(
+        self.plt_set_speed = self.plot(
             PLOT_TIME_STEPS,
-            self.set_speed_deque,
-            pen=mkPen(QColor(0, 255, 0, 64), style=Qt.DashLine),
-            name="Setpoint",
+            self.dq_set_speed,
+            pen=mkPen(PltColors.PASTEL_GREEN, style=Qt.DashLine),
+            name="Target speed",
         )
+        self.plt_power = self.plot(
+            PLOT_TIME_STEPS,
+            self.dq_speed,
+            pen=mkPen(PltColors.PASTEL_ORANGE, style=Qt.SolidLine),
+            name="engine power",
+        )
+        self.plt_current_speed = ScatterPlotItem(size=5, pen=None, brush="w")
+        self.plt_current_speed.setZValue(1)
+        self.addItem(self.plt_current_speed)
+        self.plt_current_engine_power = ScatterPlotItem(size=5, pen=None, brush="w")
+        self.plt_current_engine_power.setZValue(1)
+        self.addItem(self.plt_current_engine_power)
 
-    def update(self, speed_cmps: float, set_speed_cmps: float):
-        """Values in cm/s"""
-        self.speed_deque.append(speed_cmps)
-        self.speed_plot.setData(PLOT_TIME_STEPS, self.speed_deque)
-        self.speed_marker.setData([PLOT_TIME_STEPS[-1]], [speed_cmps])
-        self.set_speed_deque.append(set_speed_cmps)
-        self.set_speed_plot.setData(PLOT_TIME_STEPS, self.set_speed_deque)
+    def update(self, measured_speed: float, target_speed: float, engine_power: float):
+        self.dq_speed.append(measured_speed)
+        self.dq_set_speed.append(target_speed)
+        self.dq_engine_power.append(engine_power)
+        
+        self.plt_speed.setData(PLOT_TIME_STEPS, self.dq_speed)
+        self.plt_current_speed.setData([PLOT_TIME_STEPS[-1]], [measured_speed])
+        self.plt_set_speed.setData(PLOT_TIME_STEPS, self.dq_set_speed)
+        self.plt_power.setData(PLOT_TIME_STEPS, self.dq_engine_power)
+        self.plt_current_engine_power.setData([PLOT_TIME_STEPS[-1]], [engine_power])
 
 
 class SteeringPlotWidget(PlotWidget):
