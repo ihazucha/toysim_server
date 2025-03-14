@@ -4,7 +4,7 @@ from collections import deque
 from time import time_ns
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D
+from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D, QFont
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame, QVBoxLayout
 
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen, mkBrush
@@ -12,6 +12,7 @@ import pyqtgraph as pg
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
 from datalink.data import EncoderData, Rotation
+from modules.ui.presets import DefaultMonospaceFont
 
 FPS = 60
 DATA_QUEUE_LENGTH_SECONDS = 5
@@ -36,29 +37,52 @@ STEP_TICKS = [STEP_MAJOR_TICKS, STEP_MINOR_TICKS]
 # TODO: send encoder angle in deg as well
 ENCODER_RAW2DEG = 360 / 4096
 
+
+class Colors:
+    PRIMARY = "#202020"
+    ON_PRIMARY = "#919090"
+    SECONDARY = "#1E1E1E"
+    ON_SECONDARY = "#878786"
+    FOREGROUND = "#131313"
+    ON_FOREGROUND = "#565757"
+    ON_FOREGROUND_DIM = "#373737"
+    ACCENT = "#1A1A1A"
+    ON_ACCENT = "#737473"
+    ON_ACCENT_DIM = "#4A4A4A"
+    GREEN = "#98FB98"
+    ORANGE = "#FFCC99"
+    PASTEL_BLUE = "#ADD8E6"
+    PASTEL_PURPLE = "#DDA0DD"
+    PASTEL_YELLOW = "#FFFFE0"
+
+
 class PltColors:
-    PLT_BG = QColor(0x1a, 0x1a, 0x1a, 255)
-    STATS_BG = QColor(0x1e, 0x1e, 0x1e, 255)
+    PLT_BG = QColor(0x1A, 0x1A, 0x1A, 255)
+    STATS_BG = QColor(0x1E, 0x1E, 0x1E, 255)
     PASTEL_GREEN = QColor(152, 251, 152, 200)
     PASTEL_ORANGE = QColor(255, 204, 153, 200)
 
 
-class LatencyStatsWidget(QFrame):
+class PlotStatsWidget(QFrame):
     def __init__(self):
         super().__init__()
         self.setFrameShape(QFrame.StyledPanel)
         self.setFrameShadow(QFrame.Sunken)
         self.setStyleSheet(
             f"""
-            background-color: {PltColors.STATS_BG.name()};
-            color: white;
+            background-color: {Colors.ACCENT};
+            color: {Colors.ON_ACCENT};
             border-radius: 2px;
             padding: 2px;
         """
         )
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(5, 2, 5, 2)
 
-        self.stats_layout = QHBoxLayout(self)
-        self.stats_layout.setContentsMargins(5, 2, 5, 2)
+
+class LatencyStatsWidget(PlotStatsWidget):
+    def __init__(self):
+        super().__init__()
 
         # Left
         self.max_label = QLabel("")
@@ -71,13 +95,13 @@ class LatencyStatsWidget(QFrame):
         self.current_label = QLabel("")
         self.current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.stats_layout.addWidget(self.max_label)
-        self.stats_layout.addWidget(self.min_label)
-        self.stats_layout.addWidget(self.mean_label)
-        self.stats_layout.addWidget(self.std_label)
-        self.stats_layout.addStretch(1)
-        self.stats_layout.addWidget(self.current_label)
-        self.stats_layout.addWidget(self.avg_label)
+        self.layout.addWidget(self.max_label)
+        self.layout.addWidget(self.min_label)
+        self.layout.addWidget(self.mean_label)
+        self.layout.addWidget(self.std_label)
+        self.layout.addStretch(1)
+        self.layout.addWidget(self.current_label)
+        self.layout.addWidget(self.avg_label)
 
 
 class LatencyPlotWidget(QWidget):
@@ -261,65 +285,195 @@ class LatencyPlotWidget(QWidget):
             self.w_plot.setYRange(target_min, target_max, padding=0.05)
 
 
+class LongitudinalControlWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.plot_widget = SpeedPlotWidget()
+        self.stats_widget = SpeedPlotStatsWidget()
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.plot_widget, stretch=1)
+        layout.addWidget(self.stats_widget)
+
+    def update(self, measured_speed: float, target_speed: float, engine_power: float):
+        self.plot_widget.update(measured_speed, target_speed, engine_power)
+        self.stats_widget.update(measured_speed, target_speed, engine_power)
+
+
+class SpeedPlotStatsWidget(PlotStatsWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.texts = {
+            "speed": f"<span>Speed: </span><span style='color: {Colors.GREEN}'>{{:2.2f}}</span> m/s",
+            "target": f"<span>Target: </span><span style='color: {Colors.GREEN}'>{{:2.2f}}</span> m/s",
+            "error": f"<span>Error: </span><span>{{:.2f}}</span> m/s",
+            "power": f"<span>Power: </span><span style='color: {Colors.ORANGE};'>{{:3.2f}}</span> %",
+        }
+
+        # Left
+        self.speed_label = QLabel(self.texts["speed"].format(0.0))
+        self.target_label = QLabel(self.texts["target"].format(0.0))
+        self.error_label = QLabel(self.texts["error"].format(0.0))
+
+        # Right
+        self.power_label = QLabel(self.texts["power"].format(0.0))
+        self.power_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.layout.addWidget(self.speed_label)
+        self.layout.addWidget(self.target_label)
+        self.layout.addWidget(self.error_label)
+        self.layout.addStretch(1)
+        self.layout.addWidget(self.power_label)
+
+    def update(self, measured_speed: float, target_speed: float, engine_power: float):
+        self.speed_label.setText(self.texts["speed"].format(measured_speed))
+        self.target_label.setText(self.texts["target"].format(target_speed))
+        self.error_label.setText(self.texts["error"].format(measured_speed - target_speed))
+        self.power_label.setText(self.texts["power"].format(engine_power * 100))
+
+
 class SpeedPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
         self.setXRange(-DATA_QUEUE_SIZE, 0)
-        self.getAxis("bottom").setTicks(STEP_TICKS)
-        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
-        self.setBackground(PltColors.PLT_BG)
-        self.getPlotItem().setTitle("Speed")
-        self.getPlotItem().setLabel("left", "Speed [m/s]")
-        self.getPlotItem().setLabel("bottom", f"Step [n] (s = {FPS} steps)")
-        self.getPlotItem().addLegend()
+        self.setBackground(Colors.FOREGROUND)
 
+        # Initialize data queues
         self.dq_speed = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
         self.dq_set_speed = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
         self.dq_engine_power = deque(PLOT_QUEUE_DEFAULT_DATA, maxlen=DATA_QUEUE_SIZE)
 
-        self.plt_speed = self.plot(
-            PLOT_TIME_STEPS,
-            self.dq_speed,
-            pen=mkPen(PltColors.PASTEL_GREEN, style=Qt.SolidLine),
-            name="Current speed",
-        )
+        # Define consistent colors
+        self.speed_color = Colors.GREEN
+        self.power_color = Colors.ORANGE
+        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.mono_font = DefaultMonospaceFont()
+
+        self.getAxis("left").setPen(self.text_pen)
+        self.getAxis("left").setTextPen(self.text_pen)
+
+        self.getAxis("bottom").setTicks(STEP_TICKS)
+        self.getAxis("bottom").setPen(self.text_pen)
+        self.getAxis("bottom").setTextPen(self.text_pen)
+
+        # Set up grid and title
+        self.getPlotItem().showGrid(x=True, y=True, alpha=0.5)
+        self.getPlotItem().setTitle("Longitudinal Control")
+
+        # self.getPlotItem().setLabel("left", "Speed [m/s]", color=Colors.ON_ACCENT)
+        # self.getPlotItem().setLabel("bottom", f"Step [n]")
+
+        self.power_y_axis = pg.AxisItem("right")
+        self.power_y_axis.setPen(self.text_pen)
+        self.power_y_axis.setTextPen(self.text_pen)
+        # self.power_y_axis.setLabel("Power [%]", color=Colors.ON_ACCENT)
+        self.getPlotItem().layout.addItem(self.power_y_axis, 2, 3)
+
+        self.power_viewbox = pg.ViewBox()
+        self.power_y_axis.linkToView(self.power_viewbox)
+        self.power_viewbox.setXLink(self.getPlotItem())
+        self.power_viewbox.setRange(yRange=[-100, 100])
+        self.getPlotItem().scene().addItem(self.power_viewbox)
+
+        self.legend = self.getPlotItem().addLegend()
+        self.legend.anchor(itemPos=(0, 0), parentPos=(0, 1), offset=(15, -35))
+        self.legend.setBrush(QBrush(QColor(Colors.ACCENT)))
+        self.legend.setPen(mkPen(color=Colors.ON_FOREGROUND, width=0.5))
+        self.legend.layout.setContentsMargins(3, 1, 3, 1)
+        self.legend.setColumnCount(3)
+
+        self.plt_speed = self.plot(pen=mkPen(self.speed_color, style=Qt.SolidLine), name="Current")
+        self.plt_speed.setData(PLOT_TIME_STEPS, self.dq_speed)
         self.plt_set_speed = self.plot(
-            PLOT_TIME_STEPS,
-            self.dq_set_speed,
-            pen=mkPen(PltColors.PASTEL_GREEN, style=Qt.DashLine),
-            name="Target speed",
+            pen=mkPen(self.speed_color, style=Qt.DashLine), name="Target"
         )
-        self.plt_power = self.plot(
-            PLOT_TIME_STEPS,
-            self.dq_speed,
-            pen=mkPen(PltColors.PASTEL_ORANGE, style=Qt.SolidLine),
-            name="engine power",
-        )
-        self.plt_current_speed = ScatterPlotItem(size=5, pen=None, brush="w")
+        self.plt_set_speed.setData(PLOT_TIME_STEPS, self.dq_set_speed)
+
+        # Power plot
+        plt_power_pen = mkPen(self.power_color, style=Qt.SolidLine)
+        self.plt_power = pg.PlotCurveItem(pen=plt_power_pen, name="Power")
+        self.plt_power.setData(PLOT_TIME_STEPS, np.array(self.dq_engine_power))
+        self.power_viewbox.addItem(self.plt_power)
+        self.legend.addItem(PlotCurveItem(pen=plt_power_pen), "Power")
+
+        # Markers
+        self.plt_current_speed = ScatterPlotItem(size=5, pen=None, brush=self.speed_color)
         self.plt_current_speed.setZValue(1)
         self.addItem(self.plt_current_speed)
-        self.plt_current_engine_power = ScatterPlotItem(size=5, pen=None, brush="w")
+
+        self.plt_current_engine_power = ScatterPlotItem(size=5, pen=None, brush=self.power_color)
         self.plt_current_engine_power.setZValue(1)
-        self.addItem(self.plt_current_engine_power)
+        self.power_viewbox.addItem(self.plt_current_engine_power)
+
+        # Resize event for power viewbox
+        self.getPlotItem().vb.sigResized.connect(self._update_views)
+
+    def _update_views(self):
+        # Keep power_viewbox synced with main viewbox on resize
+        self.power_viewbox.setGeometry(self.getPlotItem().vb.sceneBoundingRect())
 
     def update(self, measured_speed: float, target_speed: float, engine_power: float):
+        engine_power_percent = engine_power * 100
+
         self.dq_speed.append(measured_speed)
         self.dq_set_speed.append(target_speed)
-        self.dq_engine_power.append(engine_power)
-        
+        self.dq_engine_power.append(engine_power_percent)
+
         self.plt_speed.setData(PLOT_TIME_STEPS, self.dq_speed)
-        self.plt_current_speed.setData([PLOT_TIME_STEPS[-1]], [measured_speed])
         self.plt_set_speed.setData(PLOT_TIME_STEPS, self.dq_set_speed)
-        self.plt_power.setData(PLOT_TIME_STEPS, self.dq_engine_power)
-        self.plt_current_engine_power.setData([PLOT_TIME_STEPS[-1]], [engine_power])
+        self.plt_power.setData(PLOT_TIME_STEPS, np.array(self.dq_engine_power))
+
+        self.plt_current_speed.setData([PLOT_TIME_STEPS[-1]], [measured_speed])
+        self.plt_current_engine_power.setData([PLOT_TIME_STEPS[-1]], [engine_power_percent])
+
+        self._update_y_scales()
+
+    def _update_y_scales(self):
+        # Speed
+        speed_buffer = 0.1  # 10% margin
+        speed_min = min(min(self.dq_speed), min(self.dq_set_speed))
+        speed_max = max(max(self.dq_speed), max(self.dq_set_speed))
+
+        # Add margin to values (min can't go below zero)
+        speed_range_min = speed_min * (1 - speed_buffer)
+        speed_range_max = speed_max * (1 + speed_buffer)
+
+        # Get current view range
+        current_speed_min, current_speed_max = self.viewRange()[1]
+
+        # Check if adjustment needed (avoid constant rescaling)
+        speed_too_small = speed_range_max > current_speed_max * 0.95
+        speed_too_big = (
+            current_speed_max > speed_range_max * 1.5 or current_speed_min < speed_range_min * 0.5
+        )
+
+        if speed_too_small or speed_too_big:
+            self.setYRange(speed_range_min, speed_range_max, padding=0)
+
+        # power_range_min = min(self.dq_engine_power)
+        # power_range_max = max(self.dq_engine_power)
+
+        # # Get current power view range
+        # current_power_min, current_power_max = self.power_viewbox.viewRange()[1]
+
+        # # Check if adjustment needed
+        # power_too_small = power_range_max > current_power_max * 0.75
+        # power_too_big = current_power_max > power_range_max * 1.5
+
+        # if power_too_small or power_too_big:
+        #     self.power_viewbox.setYRange(power_range_min, power_range_max, padding=0)
 
 
 class SteeringPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
-        self.setXRange(-40, 40)
+        self.setXRange(-25, 25)
         self.getAxis("left").setTicks(STEP_TICKS)
-        self.getPlotItem().showGrid(x=True, y=True)
+        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
+        self.setBackground(Colors.FOREGROUND)
         self.getPlotItem().setTitle("Steering Angle")
         self.getPlotItem().setLabel("left", f"Step [n] (s = {FPS} steps)")
         self.getPlotItem().setLabel("bottom", "Steering angle [deg]")
@@ -358,9 +512,9 @@ class MapPlotWidget(PlotWidget):
 
     def __init__(self):
         super().__init__()
-        self.setXRange(-100, 100)
-        self.setYRange(-100, 100)
-        self.getPlotItem().showGrid(x=True, y=True)
+        self.setBackground(Colors.FOREGROUND)
+        self.setAspectLocked(True)
+        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
         self.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
         self.dir_x = PlotCurveItem(pen=mkPen("r", width=2))
         self.dir_x.setZValue(1)
@@ -393,8 +547,8 @@ class IMUPlotWidget(GLViewWidget):
     def __init__(self):
         super().__init__()
         self.setSizePolicy(self.sizePolicy())
+        self.setBackgroundColor(Colors.FOREGROUND)
         self.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
-        self.setBackgroundColor("k")
 
         # Create the arrows using GLLinePlotItem
         self.arrow_x = GLLinePlotItem(
@@ -477,7 +631,8 @@ class EncodersPlotWidget(PlotWidget):
         self.setAspectLocked()
         self.setXRange(-250, 250)
         self.setYRange(-250, 250)
-        self.getPlotItem().showGrid(x=True, y=True)
+        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
+        self.setBackground(Colors.SECONDARY)
         self.getPlotItem().setTitle("Encoders Data")
 
         self.l_deque = deque(maxlen=150)

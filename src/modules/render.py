@@ -15,14 +15,16 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
     QGraphicsPixmapItem,
+    QLabel
 )
 
 from modules.ui.plots import (
+    Colors,
     EncodersPlotWidget,
     IMUPlotWidget,
     MapPlotWidget,
-    SpeedPlotWidget,
     SteeringPlotWidget,
+    LongitudinalControlWidget
 )
 from modules.ui.plots import LatencyPlotWidget
 
@@ -33,7 +35,7 @@ from modules.ui.recorder import RecordingThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigPanel
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
-
+from modules.ui.presets import DefaultMonospaceFont
 
 class FitGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
@@ -41,6 +43,7 @@ class FitGraphicsView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.pixmap_item = QGraphicsPixmapItem()
         self.scene().addItem(self.pixmap_item)
+
         self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -58,6 +61,8 @@ class FitGraphicsView(QGraphicsView):
             self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
         super().resizeEvent(event)
 
+from collections import deque
+import time
 
 class RendererMainWindow(QMainWindow):
     init_complete = Signal()
@@ -66,6 +71,10 @@ class RendererMainWindow(QMainWindow):
         super().__init__()
         self.settings_path = Path(__file__).parent / "ui/settings/window_settings.json"
         self.load_window_position()
+
+        # Initialize FPS tracking
+        self.last_update_time = time.time()
+        self.fps_samples = deque([0] * 10, maxlen=10)  # Track last 10 frames
 
     def closeEvent(self, event):
         self.save_window_position()
@@ -108,6 +117,7 @@ class RendererMainWindow(QMainWindow):
         self._init_imu_plot()
         self._init_plt_encoders()
         self._init_config_panel()
+        self._init_status_bar()
 
         self._init_layout()
         self._init_top_toolbar()
@@ -140,31 +150,47 @@ class RendererMainWindow(QMainWindow):
         else:
             self.record_sidebar.show()
 
+    def _init_status_bar(self):
+        # Get the built-in status bar
+        status_bar = self.statusBar()
+        status_bar.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: {Colors.FOREGROUND};
+                color: {Colors.ON_FOREGROUND};
+                border-top: 1px solid {Colors.ON_FOREGROUND_DIM};
+            }}
+        """)
+        
+        # Create FPS label
+        self.fps_label = QLabel("Camera FPS: --")
+        self.fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
+        
+        # Add FPS label permanently to the right side of the status bar
+        status_bar.addPermanentWidget(self.fps_label)
+
     def _init_tabs(self):
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(False)
-        self.tabs.setMovable(True)
+        self.tabs.setMovable(False)
         self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QTabWidget.North)
-        self.tabs.setFocusPolicy(Qt.StrongFocus)
-        self.tabs.setFocus()
 
         self.tab1 = QWidget()
         self.tab2 = QWidget()
 
-        self.tabs.addTab(self.tab1, "Main Layout")
-        self.tabs.addTab(self.tab2, "Custom Layout")
+        self.tabs.addTab(self.tab1, "Dashboard")
+        self.tabs.addTab(self.tab2, "Stats")
 
         self.setCentralWidget(self.tabs)
 
     def _init_layout(self):
         self._init_tab1_layout()
         self._init_tab2_layout()
-        self.setStyleSheet(
-            """
-            background-color: #2d2a2e;
-            """
-        )
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {Colors.PRIMARY};
+            }}
+        """)
 
     def _init_tab1_layout(self):
         imu_layout = QVBoxLayout()
@@ -188,6 +214,7 @@ class RendererMainWindow(QMainWindow):
         right_layout.addWidget(self.steering_plot, stretch=1)
 
         main_layout = QHBoxLayout()
+        main_layout.setSpacing(9)
         main_layout.addLayout(left_layout, stretch=1)
         main_layout.addLayout(middle_layout, stretch=1)
         main_layout.addLayout(right_layout, stretch=1)
@@ -197,7 +224,10 @@ class RendererMainWindow(QMainWindow):
     def _init_tab2_layout(self):
         self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
         self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
+        
         layout = QHBoxLayout()
+        # layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(9)
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.processor_period_plot)
         left_layout.addWidget(self.processor_dt_plot)
@@ -211,6 +241,28 @@ class RendererMainWindow(QMainWindow):
 
     def _init_top_toolbar(self):
         self.top_tool_bar = TopToolBar(parent=self.centralWidget())
+        self.top_tool_bar.setMovable(False)
+        self.top_tool_bar.setStyleSheet(
+            """
+            QToolBar {
+                border: none;
+            }
+        """
+        )
+
+        # left margin
+        left_spacer = QWidget()
+        left_spacer.setFixedWidth(3)
+        self.top_tool_bar.insertWidget(
+            self.top_tool_bar.actions()[0] if self.top_tool_bar.actions() else None, left_spacer
+        )
+
+        # right margin
+        right_spacer = QWidget()
+        right_spacer.setFixedWidth(3)
+        right_spacer.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.top_tool_bar.addWidget(right_spacer)
+
         self.addToolBar(Qt.TopToolBarArea, self.top_tool_bar)
         self.top_tool_bar.config_toggled.connect(self.toggle_config_panel)
         self.top_tool_bar.sidebar_toggled.connect(self.toggle_sidebar)
@@ -229,7 +281,7 @@ class RendererMainWindow(QMainWindow):
         self.depth_graphics_view.setMinimumSize(0, 0)
 
     def _init_speed_plot(self):
-        self.speed_plot = SpeedPlotWidget()
+        self.speed_plot = LongitudinalControlWidget()
         self.speed_plot.setMinimumSize(0, 0)
         self.speed_plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -271,6 +323,17 @@ class RendererMainWindow(QMainWindow):
         self.processor_dt_plot.update(dt_ms=dt_ms)
 
     def update_real_data(self, data: QRealData):
+        # Calculate FPS
+        current_time = time.time()
+        dt = current_time - self.last_update_time
+        self.last_update_time = current_time
+
+        if dt > 0:
+            fps = 1.0 / dt
+            self.fps_samples.append(fps)
+            avg_fps = sum(self.fps_samples) / len(self.fps_samples)
+            self.fps_label.setText(f"Camera FPS: {avg_fps:.1f}")
+
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
@@ -282,10 +345,11 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
-    def run(self):
+    def run(self):    
         app = QApplication(sys.argv)
+        app.setFont(DefaultMonospaceFont())
         window = RendererMainWindow()
-
+        
         t_sim_data = SimDataThread()
         t_sim_data.data_ready.connect(window.update_simulation_data)
         window.init_complete.connect(t_sim_data.start)

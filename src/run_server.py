@@ -14,7 +14,7 @@ def parse_args():
     parser.add_argument("--real_port", type=int, default=9999, help="Server port for real vehicle")
     parser.add_argument("-c", "--controller", type=str, choices=[c.value for c in ControllerType])
     return parser.parse_args()
-
+from time import time_ns
 
 def main():
     args = parse_args()
@@ -22,10 +22,11 @@ def main():
     sim_addr = (args.ip, args.sim_port)
     real_addr = (args.ip, args.real_port)
 
+    renderer = Renderer()
+
     p_sim_server = TcpServer(addr=sim_addr, q_recv=msg.q_sim, q_send=msg.q_control, id="sim")
     p_real_server = TcpServer(addr=real_addr, q_recv=msg.q_real, q_send=msg.q_control, id="real")
     p_processor = Processor(controller_type=ControllerType(args.controller))
-    renderer = Renderer()
 
     processes = [
         p_sim_server,
