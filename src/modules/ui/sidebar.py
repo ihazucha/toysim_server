@@ -5,8 +5,8 @@ from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QListWidget
 from utils.paths import PATH_RECORDS
 
 
-class RecordSidebar(QDockWidget):
-    def __init__(self, parent=None):
+class RecordsSidebar(QDockWidget):
+    def __init__(self, parent=None, default_closed=True):
         super().__init__(parent)
         self.setWindowTitle("Record Sidebar")
         self.setFixedWidth(200)
@@ -17,6 +17,8 @@ class RecordSidebar(QDockWidget):
         self.layout.addWidget(self.record_list)
         self.load_records()
         self.setWidget(widget)
+        if default_closed:
+            self.close()
 
     def load_records(self):
         records = os.listdir(PATH_RECORDS)

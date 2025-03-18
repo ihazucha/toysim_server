@@ -1,5 +1,6 @@
-from multiprocessing import Process
 from time import sleep, time_ns
+
+from multiprocessing import Process
 import traceback
 import numpy as np
 import cv2
@@ -17,9 +18,10 @@ from datalink.data import (
 from modules.controller import DualSense, PurePursuitPID
 from modules.path_planning.red_roadmarks import RedRoadmarksPlanner, Camera
 
-
 from threading import Thread
 from enum import Enum
+
+
 
 
 # TODO: figure out more elegant way to update to avoid blocking
@@ -54,18 +56,6 @@ def compute_radial_dist(width: int, height: int):
             dy = y - center_y
             radial_dist[y, x] = dx**2 + dy**2
     return radial_dist
-
-
-RADIAL_DIST = compute_radial_dist(width=640, height=480)
-
-
-def depth_from_image_center(depth: np.ndarray):
-    """The depth values returned by the UE5 simulation contain scene depth
-    which is measured from each individual pixel to the point it is capturing.
-    This method calculates distance from the image center, which corresponds
-    to the camera location inside the simulation
-    """
-    return np.sqrt(RADIAL_DIST + depth.astype(np.float32) ** 2)
 
 
 # TODO: precalculate UV (image coordinates) for all points on the road
@@ -161,6 +151,18 @@ class Processor(Process):
         q_processing = messaging.q_processing.get_producer()
 
         start_apply_ui_config_thread(controller)
+
+        RADIAL_DIST = compute_radial_dist(width=640, height=480)
+
+
+        def depth_from_image_center(depth: np.ndarray):
+            """The depth values returned by the UE5 simulation contain scene depth
+            which is measured from each individual pixel to the point it is capturing.
+            This method calculates distance from the image center, which corresponds
+            to the camera location inside the simulation
+            """
+            return np.sqrt(RADIAL_DIST + depth.astype(np.float32) ** 2)
+
 
         # Sync
         _ = SimData.from_bytes(q_simulation.get())

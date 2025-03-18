@@ -74,12 +74,15 @@ class FloatSlider(QWidget):
             pass  # Ignore invalid input
 
 
-class ConfigPanel(QDockWidget):
-    def __init__(self, parent=None):
+class ConfigSidebar(QDockWidget):
+    def __init__(self, parent=None, default_closed=True):
         super().__init__("Config", parent)
         self.data = PurePursuitPIDConfig()
         self.init_ui()
         self._q_ui = messaging.q_ui.get_producer()
+        
+        if default_closed:
+            self.close()
 
     def init_ui(self):
         self.config_widget = QWidget()

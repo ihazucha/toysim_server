@@ -1,9 +1,9 @@
-from pydualsense import pydualsense
+from time import time_ns
+
+import numpy as np
+
 from datalink.data import PurePursuitPIDConfig
 from modules.path_tracking.pid_pure_pursuit import PID, PurePursuit
-
-from time import time_ns
-import numpy as np
 
 
 class Controller:
@@ -33,6 +33,8 @@ class DualSense(Controller):
 
     def __init__(self):
         super().__init__()
+        # TODO: adhoc import to reduce lib loading time if not used
+        from pydualsense import pydualsense
         self._dualsense = pydualsense()
         self._connected = False
         try:

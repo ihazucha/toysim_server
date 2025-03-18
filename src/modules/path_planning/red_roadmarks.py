@@ -1,9 +1,7 @@
 import numpy as np
 import cv2
 
-from scipy.interpolate import interp1d
 from pathlib import Path
-
 from datalink.data import Position, Rotation, ImageParams
 
 # TODO: check for polyfit properly
@@ -218,9 +216,9 @@ class RedRoadmarksPlanner:
 
     @staticmethod
     def interpolate_roadmarks(roadmarks: np.ndarray) -> np.ndarray:
-        f = interp1d(roadmarks[:, 0], roadmarks[:, 1], kind="linear")
+        # f = interp1d(roadmarks[:, 0], roadmarks[:, 1], kind="linear")
         xs = np.linspace(roadmarks[0, 0], roadmarks[-1, 0], num=5)
-        ys = f(xs)
+        ys = np.interp(xs, roadmarks[:, 0], roadmarks[:, 1])
         return np.column_stack((xs, ys))
 
     @staticmethod

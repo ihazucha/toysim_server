@@ -1,5 +1,5 @@
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QToolBar, QWidget, QStyle, QWidgetAction, QHBoxLayout, QSpacerItem, QSizePolicy
+from PySide6.QtWidgets import QToolBar, QWidget, QStyle, QWidgetAction, QSizePolicy
 from PySide6.QtGui import QIcon, QAction
 
 from utils.paths import icon_path
@@ -7,8 +7,8 @@ from utils.paths import icon_path
 
 class TopToolBar(QToolBar):
     record_toggled = Signal(bool)
-    config_toggled = Signal(bool)
-    sidebar_toggled = Signal(bool)
+    config_panel_toggled = Signal(bool)
+    records_panel_toggled = Signal(bool)
 
     def __init__(self, parent: QWidget, name="TopToolBar"):
         super().__init__(name)
@@ -19,6 +19,28 @@ class TopToolBar(QToolBar):
         self._add_action_toggle_config()
 
     def _init_layout(self):
+        self.setMovable(False)
+        self.setStyleSheet(
+            """
+            QToolBar {
+                border: none;
+            }
+        """
+        )
+
+        # Margin back (unable to set left and right margins via CSS)
+        left_margin = QWidget()
+        left_margin.setFixedWidth(3)
+        self.insertWidget(
+            self.actions()[0] if self.actions() else None, left_margin
+        )
+
+        right_margin = QWidget()
+        right_margin.setFixedWidth(3)
+        right_margin.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.addWidget(right_margin)
+
+      
         left_spacer_widget = QWidget()
         left_spacer_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         left_spacer_action = QWidgetAction(self)
@@ -46,7 +68,7 @@ class TopToolBar(QToolBar):
         icon = self.style().standardIcon(QStyle.SP_FileDialogDetailedView)
         a = QAction(icon, "Config", self)
         a.setCheckable(True)
-        a.toggled.connect(self.config_toggled.emit)
+        a.toggled.connect(self.config_panel_toggled.emit)
         a.setShortcut("Ctrl+C")
         self.insertAction(self.right_spacer_action, a)
 
@@ -79,6 +101,6 @@ class TopToolBar(QToolBar):
         icon = self.style().standardIcon(QStyle.SP_DirIcon)
         a = QAction(icon, "Sidebar", self)
         a.setCheckable(True)
-        a.toggled.connect(self.sidebar_toggled.emit)
+        a.toggled.connect(self.records_panel_toggled.emit)
         a.setShortcut("Ctrl+E")
         self.insertAction(self.left_spacer_action, a)
