@@ -27,19 +27,6 @@ class TopToolBar(QToolBar):
             }
         """
         )
-
-        # Margin back (unable to set left and right margins via CSS)
-        left_margin = QWidget()
-        left_margin.setFixedWidth(3)
-        self.insertWidget(
-            self.actions()[0] if self.actions() else None, left_margin
-        )
-
-        right_margin = QWidget()
-        right_margin.setFixedWidth(3)
-        right_margin.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.addWidget(right_margin)
-
       
         left_spacer_widget = QWidget()
         left_spacer_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)

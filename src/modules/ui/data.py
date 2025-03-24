@@ -83,6 +83,7 @@ class VehicleDataThread(QThread):
             real_data: RealData = RealData.from_bytes(q.get())
             jpg_image_data: JPGImageData = real_data.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
+            image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
             qimage = npimage2qimage(image_array)
             # TODO: replace with processed data if neccesary
             qvehicle_data = QRealData(real_data)

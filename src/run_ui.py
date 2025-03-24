@@ -20,3 +20,6 @@ def main():
         finally:
             zmq.Context.instance().destroy()
             print("Exiting")
+
+if __name__ == "__main__":
+    main()
