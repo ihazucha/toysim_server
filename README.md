@@ -25,27 +25,23 @@ computer vision, control theory, and others, combined in compact package for who
 ## TODO: BUGS
 
 - [ ] When TcpConnection_BP has tick time set to 0.5s - the connection will be made but no data will be passed for some reason
-- [ ] Algo config panel starts with different data than processor is configured with
 
 ## TODO
 
  
-- [ ] general info panel
-  - dt and FPS of the simulation/car
-  - dt and FPS of the UI
-  - delay between the client and UI
-    - current value and history (plot)
-- [x] move client/server + data structures code into a separate git project, included in the existing ones
+- [ ] System Panel
+  - FPS/dt of the simulation/car (components)
+  - FPS/dt of the UI
+  - dt between UI and Client
+    - [ ] current value and history (plot)
 - [x] THE SIMULATION DEPTH DATA IS INCORRECT - EACH PIXEL SHOWS DISTANCE FROM THE PIXEL, NOT FROM CAMERA CENTER
   - [ ] Make this to be done inside of the simulation, rather than in the processor
-- [ ] Make renderer visualize all available data - especially FPS statistics
-- [ ]standardize simulation and physical car communication channel
-  (TCP vs. UDP with multiple channels for image, fast sensor data, ...)
-- [ ] finish record-playback feature such that:
-  - panel with recordings is available, showing:
+- [ ] Standardize simulation and physical car communication channel
+- [ ] Record-playback:
+  - Sidebar with recordings:
     - simulation datetime
-    - optional description
-    - simulation vs. car
+    - editable optional description
+    - Client ID (sim/alamak)
     - first image (if video-feed present)
     - "Open folder" button
     - recordings folder path
