@@ -3,7 +3,7 @@ import os
 from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout, QListWidget
 
 from utils.paths import PATH_RECORDS
-
+from datetime import datetime
 
 class RecordsSidebar(QDockWidget):
     def __init__(self, parent=None, default_closed=True):
@@ -23,7 +23,13 @@ class RecordsSidebar(QDockWidget):
     def load_records(self):
         records = os.listdir(PATH_RECORDS)
         for record in records:
-            self.record_list.addItem(record)
+            try:
+                timestamp = int(record.split(".")[0])
+                record = f"{datetime.fromtimestamp(timestamp / 1e9).strftime('%d-%m-%Y %H:%M:%S')}"
+                self.record_list.addItem(record)
+            except Exception as e:
+                print(f"[{self.__class__.__name__}] Encountered invalid record name format: {record}")
+                print(e)
 
     def add_record(self, record_name):
         self.record_list.addItem(record_name)

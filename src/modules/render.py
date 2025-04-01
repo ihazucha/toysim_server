@@ -23,6 +23,7 @@ from modules.ui.plots import (
 
 from modules.ui.plots import LatencyPlotWidget
 
+from modules.messaging import messaging
 from utils.paths import icon_path
 
 from modules.ui.sidebar import RecordsSidebar
@@ -77,10 +78,10 @@ class RendererMainWindow(QMainWindow):
         self.setWindowTitle("ToySim UI")
         self.setWindowIcon(QIcon(icon_path("toysim_icon")))
 
+        self._init_tabs()
         config_sidebar = self._init_config_sidebar()
         records_sidebar = self._init_records_sidebar()
         self.top_tool_bar = self._init_top_toolbar(config_sidebar, records_sidebar)
-        self._init_tabs()
         self._init_status_bar()
 
         self.showNormal()
@@ -232,6 +233,9 @@ class RendererMainWindow(QMainWindow):
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
+        rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
+        self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
+
         self.speed_plot.update(
             measured_speed=data.raw.sensor_fusion.avg_speed,
             target_speed=data.raw.control.speed,
@@ -249,16 +253,20 @@ class Renderer:
 
         t_sim_data = SimDataThread()
         t_sim_data.data_ready.connect(window.update_simulation_data)
-        window.init_complete.connect(t_sim_data.start)
+        # window.init_complete.connect(t_sim_data.start)
 
         t_vehicle_data = VehicleDataThread()
         t_vehicle_data.data_ready.connect(window.update_real_data)
         window.init_complete.connect(t_vehicle_data.start)
 
-        t_rec = RecordingThread()
+        t_rec = RecordingThread(data_queue=messaging.q_processing)
         window.init_complete.connect(t_rec.start)
 
-        threads = [t_sim_data, t_vehicle_data, t_rec]
+        threads = [
+            t_sim_data,
+            t_vehicle_data,
+            t_rec,
+        ]
 
         def stop_threads():
             # TODO: try to exit gracefully

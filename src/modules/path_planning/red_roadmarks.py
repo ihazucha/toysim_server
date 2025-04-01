@@ -1,22 +1,116 @@
 import numpy as np
 import cv2
 
-from pathlib import Path
-from datalink.data import Position, Rotation, ImageParams
+from datalink.data import Pose
+from typing import Tuple, List
+from scipy.interpolate import splprep, splev
 
 # TODO: check for polyfit properly
 import warnings
-warnings.simplefilter('ignore', np.RankWarning)
 
-# TODO: find another place for camera
+warnings.simplefilter("ignore", np.RankWarning)
+
+
+# Camera
+# -------------------------------------------------------------------------------------------------------------
+
+
+def rpi_v2_intrinsic_matrix(image_shape: Tuple[int, int], binning_factor=2):
+    assert binning_factor in [1, 2, 4], "Binning factor not in {1, 2, 4}"
+    focal_len_mm = 3.04
+    pixel_size_mm = 0.00112
+    focal_len_pixels = focal_len_mm / pixel_size_mm
+    # focal_len = 3.04 / 1e3
+    # pixel_size = 0.00112 / 1e3
+    # focal_len_pixels = focal_len / pixel_size
+
+    # Binning combines nearby (2, 4..) pixel values into one
+    fx = fy = focal_len_pixels
+    cx, cy = image_shape[0] / 2, image_shape[1] / 2
+
+    return np.array(
+        [
+            [fx, 0, cx],
+            [0, fy, cy],
+            [0, 0, 1],
+        ]
+    )
+
+
+def rpi_v2_intrinsic_matrix_from_fov(image_shape: Tuple[int, int]):
+    """
+    Calculate the intrinsic matrix for Raspberry Pi Camera V2 using FOV values.
+
+    Args:
+        image_shape: (height, width) in pixels
+
+    Returns:
+        3x3 intrinsic camera matrix
+    """
+
+    # RPI Camera V2 FOV in degrees
+    fov_h_deg = 62.2  # Horizontal FOV
+    fov_v_deg = 48.8  # Vertical FOV
+
+    # Convert FOV to radians
+    fov_h = np.deg2rad(fov_h_deg)
+    fov_v = np.deg2rad(fov_v_deg)
+
+    width, height = image_shape
+
+    # Calculate focal lengths using FOV
+    fx = (width / 2) / np.tan(fov_h / 2)
+    fy = (height / 2) / np.tan(fov_v / 2)
+
+    # Principal point (typically center of image)
+    cx = width / 2
+    cy = height / 2
+
+    # return np.array([
+    #     [631.00614559,   0.,         399.13995178],
+    #     [0.,         630.71927485, 298.79517474],
+    #     [0.,           0.,           1.        ]
+    # ])
+
+    # Create the intrinsic matrix
+    return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+
+
+def unreal_engine_intrinsic_matrix(image_shape: Tuple[int, int], fov_deg: int):
+    fov = np.deg2rad(fov_deg)
+    a = (image_shape[0] / 2.0) / np.tan(fov / 2.0)  # Alpha
+    cx, cy = image_shape[0] / 2, image_shape[1] / 2
+    return np.array(
+        [
+            [a, 0, cx],
+            [0, a, cy],
+            [0, 0, 1],
+        ]
+    )
+
+
 class Camera:
-    def __init__(self, position: Position, rotation: Rotation, img_params: ImageParams):
-        self.position = position
-        self.rotation = rotation
-        self.img_params = img_params
+    def __init__(
+        self,
+        pose: Pose,
+        image_shape: Tuple[int, int],
+        intrinsic_matrix: np.ndarray,
+        extrinsic_matrix: np.ndarray = None,
+    ):
+        self.pose = pose
+        self.position = self.pose.position
+        self.rotation = self.pose.rotation
+        self.image_shape = image_shape
 
-        self.M = self.intrinsic_matrix()
+        self.M = intrinsic_matrix
         self.M_i = np.linalg.inv(self.M)
+
+        self.distortion_coeffs = np.array([0.14946983, -0.36958066, -0.01219314, -0.00706742, 0.19695792])
+        # Get optimal camera matrix
+        h, w = image_shape
+        self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(
+            self.M, self.distortion_coeffs, (w, h), 1, (w, h)
+        )
 
         self.R_rc = self.rotation_matrix()
         self.R_cr = self.R_rc.T
@@ -24,26 +118,34 @@ class Camera:
         self.T_rc = np.array([self.position.x, self.position.y, self.position.z])
         self.T_cr = self.T_rc * -1.0
 
-        self.H_cr = np.eye(4)
-        self.H_cr[:3, :3] = self.R_cr
-        self.H_cr[:3, 3] = self.T_cr
+        self.H_cr = Camera.homogenous_transformation_matrix(R=self.R_cr, T=self.T_cr)
         self.H_rc = np.linalg.inv(self.H_cr)
 
         self.road_normal_camera_frame = self.R_rc @ np.array([0, 1, 0])
 
-        self.xy_roadframe_iso8855 = self.calc_or_load_xy_roadframe_iso8855()
-        self.xyz_camframe = self.calc_or_load_xyz_camframe()
+        xyz_roadframe = self.image2xyz_roadframe()
+        self.image_xyz_roadframe = xyz_roadframe.reshape(*self.image_shape, 3)
 
-    def intrinsic_matrix(self) -> np.ndarray:
-        fov = np.deg2rad(self.img_params.fov_deg)
-        alpha = (self.img_params.width / 2.0) / np.tan(fov / 2.0)
-        return np.array(
-            [
-                [alpha, 0, self.img_params.width / 2],
-                [0, alpha, self.img_params.height / 2],
-                [0, 0, 1],
-            ]
-        )
+    def undistort_image(self, img: np.ndarray) -> np.ndarray:
+        """Undistort an image using the camera's distortion coefficients."""     
+        # Undistort the image
+        dst = cv2.undistort(img, self.M, self.distortion_coeffs, None, self.new_camera_matrix)
+        return dst
+
+    def update_camera(self):
+        self.R_rc = self.rotation_matrix()
+        self.R_cr = self.R_rc.T
+
+        self.T_rc = np.array([self.position.x, self.position.y, self.position.z])
+        self.T_cr = self.T_rc * -1.0
+
+        self.H_cr = Camera.homogenous_transformation_matrix(R=self.R_cr, T=self.T_cr)
+        self.H_rc = np.linalg.inv(self.H_cr)
+
+        self.road_normal_camera_frame = self.R_rc @ np.array([0, 1, 0])
+
+        xyz_roadframe = self.image2xyz_roadframe()
+        self.image_xyz_roadframe = xyz_roadframe.reshape(*self.image_shape, 3)
 
     def rotation_matrix(self) -> np.ndarray:
         roll = np.deg2rad(self.rotation.roll)
@@ -60,46 +162,19 @@ class Camera:
             ]
         )
 
-    def calc_or_load_xy_roadframe_iso8855(self):
-        w, h, fov_deg = self.img_params.width, self.img_params.height, self.img_params.fov_deg
-        file_name = f"cache_xy_roadframe_iso8855_{w}x{h}_fov{fov_deg}.npy"
-        file_path = Path(__file__).parent / file_name
-        xy_roadframe_iso8855 = None
-        try:
-            xy_roadframe_iso8855 = np.load(file_path)
-            print(f"Loaded cached data from {file_path}")
-        except FileNotFoundError:
-            xy_roadframe_iso8855 = self.image2xy_roadframe_iso8855()
-            np.save(file_path, xy_roadframe_iso8855)
-            print(f"Saved cache data to {file_path}")
-        return xy_roadframe_iso8855
-
-    def calc_or_load_xyz_camframe(self):
-        w, h, fov_deg = self.img_params.width, self.img_params.height, self.img_params.fov_deg
-        file_name = f"cache_xy_camframe_{w}x{h}_fov{fov_deg}.npy"
-        file_path = Path(__file__).parent / file_name
-        xyz_camframe = None
-        try:
-            xyz_camframe = np.load(file_path)
-            print(f"Loaded cached data from {file_path}")
-        except FileNotFoundError:
-            xyz_camframe = self.image2xyz_camframe()
-            np.save(file_path, xyz_camframe)
-            print(f"Saved cache data to {file_path}")
-        return xyz_camframe
-
-    def cam2road(self, vec: np.ndarray) -> np.ndarray:
-        return (self.R_cr @ vec) + self.T_cr
-
-    def road2cam(self, vec: np.ndarray) -> np.ndarray:
-        return self.R_rc @ (vec + self.T_rc)
+    @staticmethod
+    def homogenous_transformation_matrix(R, T):
+        H = np.eye(4)
+        H[:3, :3] = R
+        H[:3, 3] = T
+        return H
 
     def uv2xyz_camframe(self, u: int, v: int) -> np.ndarray:
         image_point = [u, v, 1]
         direction_vector = self.M_i @ image_point
         scaling_factor = self.position.y / (self.road_normal_camera_frame @ direction_vector)
-        xyz_c = scaling_factor * direction_vector
-        return xyz_c
+        xyz = scaling_factor * direction_vector
+        return xyz
 
     def xyz_camframe2uv(self, xyz: np.ndarray) -> np.ndarray:
         uvw = self.M @ xyz
@@ -107,124 +182,225 @@ class Camera:
         u, v = int(uvw[0]), int(uvw[1])
         return np.array([u, v])
 
-    def uv2xyz_roadframe(self, u: int, v: int) -> np.ndarray:
-        xyz_c = self.uv2xyz_camframe(u, v)
-        return self.cam2road(xyz_c)
+    def uv2xyzw_roadframe(self, u: int, v: int) -> np.ndarray:
+        xyz = self.uv2xyz_camframe(u, v)
+        xyzw = Camera.cart2homo(xyz)
+        return self.road2road_iso8855(self.H_cr @ xyzw)
 
-    def uv2xyz_roadframe_iso8855(self, u: int, v: int) -> np.ndarray:
-        x, y, z = self.uv2xyz_roadframe(u, v)
-        return np.array([z, -x, -y])
+    def road2road_iso8855(self, xyzw):
+        return np.array([xyzw[2], -xyzw[0], -xyzw[1], xyzw[3]])
 
-    def xyz_roadframe2uv(self, xyz):
-        xyz_camframe = self.road2cam(xyz)
+    def road_iso88552_road(self, xyzw):
+        return np.array([-xyzw[1], -xyzw[2], xyzw[0], xyzw[3]])
+
+    def xyzw_roadframe2uv(self, xyzw):
+        xyzw_camframe = self.H_rc @ self.road_iso88552_road(xyzw)
+        xyz_camframe = Camera.homo2cart(xyzw_camframe)
         return self.xyz_camframe2uv(xyz_camframe)
 
-    def xyz_roadframe_iso88552uv(self, xyz: np.ndarray) -> np.ndarray:
-        x, y, z = -xyz[1], -xyz[2], xyz[0]
-        return self.xyz_roadframe2uv(np.array([x, y, z]))
+    def image2xyz_roadframe(self) -> np.ndarray:
+        # 1. Create meshgrid of all pixel coordinates
+        u_indices = np.arange(self.image_shape[0])
+        v_indices = np.arange(self.image_shape[1])
+        u_grid, v_grid = np.meshgrid(u_indices, v_indices, indexing="ij")
 
-    def image2xy_roadframe_iso8855(self) -> np.ndarray:
-        # TODO: make fast
-        xy = np.zeros((self.img_params.width, self.img_params.height, 2))
-        for u in range(self.img_params.width):
-            for v in range(self.img_params.height):
-                x, y, _ = self.uv2xyz_roadframe_iso8855(u, v)
-                xy[u, v] = x, y
-        return xy
-    
-    def image2xyz_camframe(self) -> np.ndarray:
-        xyz = np.zeros((self.img_params.width, self.img_params.height, 3))
-        for u in range(self.img_params.width):
-            for v in range(self.img_params.height):
-                xyz[u, v, :2] = self.uv2xyz_camframe(u, v)[:2]
-        return xyz
-    
-    def v_threshold_by_distance(self, distance: float):
-        road_point_road_frame = np.array([0, 0, distance, 1])
-        road_point_cam_frame = self.H_rc @ road_point_road_frame
-        uv_vec = self.M @ road_point_cam_frame[:3]
-        uv_vec /= uv_vec[2]
-        cut_v = uv_vec[1]
-        return cut_v
+        # 2. Reshape to (N, 2) where N = width * height
+        pixel_coords = np.stack([u_grid.flatten(), v_grid.flatten()], axis=-1)
 
+        # 3. Add homogeneous coordinate and transform to camera ray directions
+        pixel_coords_h = np.column_stack([pixel_coords, np.ones(pixel_coords.shape[0])])
+        rays = pixel_coords_h @ self.M_i.T
 
-class RedRoadmarksPlanner:
-    def __init__(self, camera: Camera):
-        self.camera = camera
+        # 4. Compute scaling factors for all points
+        # road_normal · ray = cos(angle) * |ray|
+        denominators = np.sum(self.road_normal_camera_frame * rays, axis=1)
+        scaling_factors = self.position.y / denominators
 
-        # Intermediate calculations for easier debugging
-        self.bgr_image = None
-        self.bgr_filtered = None
-        self.roadmarks_imageframe = None
-        self.roadmarks = None
-        self.roadmarks_interp = None
-        self.path = None
+        # 5. Scale rays to get 3D points in camera frame
+        xyzw_cam = rays * scaling_factors[:, np.newaxis]
 
-    def update(self, rgb_image: np.ndarray):
-        self.bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        self.bgr_filtered = RedRoadmarksPlanner.red_color_thresh_filter(self.bgr_image)
-        self.roadmarks_imageframe = self.find_roadmarks(self.bgr_filtered)
-        self.roadmarks = np.array(
-            [self.camera.xy_roadframe_iso8855[uv] for uv in self.roadmarks_imageframe]
-        )
-        if self.roadmarks.size < 2:
-            # TODO: think about better approach
-            self.path = self.roadmarks
-            return
-        self.roadmarks_interp = RedRoadmarksPlanner.interpolate_roadmarks(self.roadmarks)
-        self.path = RedRoadmarksPlanner.polyline_fit_path(self.roadmarks_interp)
+        # 6. Convert to homogeneous coordinates
+        xyzw_cam = np.column_stack([xyzw_cam, np.ones(xyzw_cam.shape[0])])
+
+        # 7. Transform to road frame
+        xyzw_road = xyzw_cam @ self.H_cr.T
+
+        # 8. Convert to ISO8855 coordinate system (z, -x, -y, w)
+        xyz_iso8855 = np.column_stack([xyzw_road[:, 2], -xyzw_road[:, 0], -xyzw_road[:, 1]])
+        return xyz_iso8855
 
     @staticmethod
-    def red_color_thresh_filter(bgr_image):
-        hsv_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
+    def cart2homo(xyz: np.ndarray, w: float = 1) -> np.ndarray:
+        return np.append(xyz, w)
 
-        # Red in HSV space is depicted by Hue around 360 deg
-        # which is around 179 (max value in OpenCV)
-        lower_red1 = np.array([0, 50, 50])
-        upper_red1 = np.array([6, 255, 255])
-        lower_red2 = np.array([173, 50, 50])
-        upper_red2 = np.array([189, 255, 255])
-        mask1 = cv2.inRange(hsv_image, lower_red1, upper_red1)
-        mask2 = cv2.inRange(hsv_image, lower_red2, upper_red2)
-        mask = mask1 + mask2
+    @staticmethod
+    def homo2cart(xyzw: np.ndarray) -> np.ndarray:
+        if np.isclose(xyzw[3], 0):
+            print(f"[WARNING] Homogenous coordinates {xyzw} with w ~= 0")
+            xyzw[:3]
+        else:
+            return (xyzw / xyzw[3])[:3]
 
-        kernel = np.ones((2, 2), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-        hsv_filtered = cv2.bitwise_and(hsv_image, hsv_image, mask=mask)
-        return cv2.cvtColor(hsv_filtered, cv2.COLOR_HSV2BGR)
+# Planner
+# -------------------------------------------------------------------------------------------------
 
-    def find_roadmarks(
-        self, bgr_filtered: np.ndarray, min_area: float = 11, max_roadmarks: int = 6
-    ) -> list:
+
+class HSVColorFilter:
+    """Detects given colors in images."""
+
+    def __init__(
+        self,
+        color_ranges: List[Tuple[List]],
+        morph_kernel=(2, 2),
+        morph_open=True,
+        morph_close=True,
+    ):
+        """
+        Args:
+            color_ranges: [(lower_bound, upper_bound), ...] where bound = [H, S, V]
+            kernel_size: Size of kernel for morphological operations (default: (2, 2))
+            morph_open: Apply morphological opening (default: True)
+            morph_close: Apply morphological closing (default: True)
+        """
+        self.color_ranges = color_ranges
+        self.morph_kernel = np.ones(morph_kernel, np.uint8)
+        self.morph_open = morph_open
+        self.morph_close = morph_close
+
+    def apply(self, img):
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+        mask = cv2.inRange(img_hsv, self.color_ranges[0][0], self.color_ranges[0][1])
+        for lower, upper in self.color_ranges[1:]:
+            mask = mask + cv2.inRange(img_hsv, lower, upper)
+
+        if self.morph_open:
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.morph_kernel)
+        if self.morph_close:
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.morph_kernel)
+
+        img_hsv_filtered = cv2.bitwise_and(img_hsv, img_hsv, mask=mask)
+        return cv2.cvtColor(img_hsv_filtered, cv2.COLOR_HSV2BGR)
+
+    @classmethod
+    def new_red(cls):
+        # Red = Hue around 360 deg (179 - max value in OpenCV)
+        color_ranges = [
+            (np.array([0, 50, 50]), np.array([6, 255, 255])),
+            (np.array([173, 50, 50]), np.array([180, 255, 255])),
+        ]
+        return cls(color_ranges)
+
+    @classmethod
+    def new_bright(cls):
+        # Any Hue and Saturation, high Value
+        # TODO: could be make simpler and more efficient converting to grayscale and using intensity
+        color_ranges = [(np.array([0, 0, 203]), np.array([180, 255, 255]))]
+        return cls(color_ranges)
+
+
+class RoadmarksPlannerConfig:
+    def __init__(self, roadmark_min_area: float, roadmark_max_count: int):
+        self.roadmark_min_area = roadmark_min_area
+        self.roadmark_max_count = roadmark_max_count
+
+
+class RoadmarksPlanner:
+    def __init__(self, camera: Camera, filter: HSVColorFilter, config: RoadmarksPlannerConfig):
+        self.camera = camera
+        self.filter = filter
+        self.config = config
+        # Intermediates
+        self.img_filtered = None
+        self.roadmarks_imgframe = None
+        self.roadmarks_roadframe = None
+        self.path_roadframe = None
+
+    def set_config(self, config: RoadmarksPlannerConfig):
+        self.config = config
+
+    def update(self, img: np.ndarray):
+        self.img_filtered = self.filter.apply(img)
+        self.roadmarks_imgframe = self.get_roadmark_positions(self.img_filtered)
+        self.roadmarks_roadframe = np.array(
+            [self.camera.image_xyz_roadframe[u, v][:2] for u, v in self.roadmarks_imgframe]
+        )
+        self.path_roadframe = self.polyline_fit_path(self.roadmarks_roadframe)
+
+    def get_roadmark_positions(self, bgr_filtered: np.ndarray) -> np.ndarray:
         # TODO: find better way to detect valid roadmarks
-        gray = cv2.cvtColor(bgr_filtered, cv2.COLOR_BGR2GRAY)
-        contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        img_gray = cv2.cvtColor(bgr_filtered, cv2.COLOR_BGR2GRAY)
+        contours, _ = cv2.findContours(img_gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         roadmark_centers = []
         for c in contours:
-            if cv2.contourArea(c) < min_area:
+            if len(roadmark_centers) == self.config.roadmark_max_count:
+                break
+            if cv2.contourArea(c) < self.config.roadmark_min_area:
                 continue
-            x, y, w, h = cv2.boundingRect(c)
-            xc, yc = (x + w // 2, y + h // 2)
-            if (xc < (self.camera.img_params.width * 0.1)) or (
-                xc > (self.camera.img_params.width * 0.9)
-            ):
-                continue
-            roadmark_centers.append((xc, yc))
-        return roadmark_centers[:max_roadmarks] if max_roadmarks > 0 else roadmark_centers
+            u, v, width, height = cv2.boundingRect(c)
+            uc, vc = (u + width // 2, v + height // 2)
+            roadmark_centers.append((uc, vc))
+        return np.array(roadmark_centers)
 
-    @staticmethod
-    def interpolate_roadmarks(roadmarks: np.ndarray) -> np.ndarray:
-        # f = interp1d(roadmarks[:, 0], roadmarks[:, 1], kind="linear")
-        xs = np.linspace(roadmarks[0, 0], roadmarks[-1, 0], num=5)
-        ys = np.interp(xs, roadmarks[:, 0], roadmarks[:, 1])
-        return np.column_stack((xs, ys))
+    # def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
+    #     coeffs = np.polyfit(x=roadmarks[:, 0], y=roadmarks[:, 1], deg=3)
+    #     f = np.poly1d(coeffs)
+    #     step = abs(roadmarks[-1][0] - roadmarks[0][0]) / 100
+    #     xs = np.arange(roadmarks[0][0], roadmarks[-1][0], step)
+    #     ys = f(xs)
+    #     return np.column_stack((xs, ys))
 
-    @staticmethod
-    def polyline_fit_path(roadmarks: np.ndarray) -> np.ndarray:
-        coeffs = np.polyfit(x=roadmarks[:, 0], y=roadmarks[:, 1], deg=3)
-        f = np.poly1d(coeffs)
-        xs = np.arange(roadmarks[0][0], roadmarks[-1][0], 50)
-        ys = f(xs)
-        return np.column_stack((xs, ys))
+
+    def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
+        """
+        Fits a smooth path through roadmarks using parametric cubic splines.
+        Handles complex paths including loops and vertical segments.
+
+        Args:
+            roadmarks: Nx2 array of (x,y) roadmark coordinates
+
+        Returns:
+            Nx2 array of points forming a smooth path
+        """
+
+        if len(roadmarks) < 2:
+            return roadmarks
+
+        # Parametric spline representation (handles vertical segments and loops)
+        tck, u = splprep([roadmarks[:, 0], roadmarks[:, 1]], s=0, k=min(3, len(roadmarks) - 1))
+
+        num_points = 50
+        u_new = np.linspace(0, 1, num_points)
+        x_spline, y_spline = splev(u_new, tck)
+
+        return np.column_stack((x_spline, y_spline))
+
+    # def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
+    #     """
+    #     Fits a smooth path through roadmarks using a B-spline approximation.
+    #     Handles complex paths including loops and vertical segments.
+
+    #     Args:
+    #         roadmarks: Nx2 array of (x,y) roadmark coordinates
+
+    #     Returns:
+    #         Nx2 array of points forming a smooth path
+    #     """
+
+    #     if len(roadmarks) < 2:
+    #         return roadmarks
+        
+    #     print(roadmarks)
+
+    #     # Fit a B-spline curve to the roadmarks
+    #     num_points = 100  # Number of points in the resulting smooth path
+
+    #     # Generate a uniform parameterization for the roadmarks
+    #     t = np.linspace(0, 1, len(roadmarks))
+
+    #     # Fit the B-spline
+    #     x_spline = np.interp(np.linspace(0, 1, num_points), t, roadmarks[:, 0])
+    #     y_spline = np.interp(np.linspace(0, 1, num_points), t, roadmarks[:, 1])
+
+    #     return np.column_stack((x_spline, y_spline))

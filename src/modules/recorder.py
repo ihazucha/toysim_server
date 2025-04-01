@@ -1,36 +1,44 @@
 import struct
-from modules.messaging import messaging
-from datalink.data import SimData
+from datalink.data import Serializable
 
+from datalink.ipc import SPMCQueue
+
+# TODO: create a data format such that all relevant (meta)data are stored:
+# - type of client, configuration, settings, datetime, measurement & algorithm data
 
 class RecordWriter:
-    def __init__(self):
+    def __init__(self, data_queue: SPMCQueue):
         self._running = False
+        self._data_queue = data_queue
 
-    def write_new(self, record_path: str):
-        # TODO: dinstinguish between simulation and real car
-        q = messaging.q_sim.get_consumer()
+    def write_new(self, file):
+        q = self._data_queue.get_consumer()
         self._running = True
-        with open(record_path, "wb") as f:
-            frame_size = struct.pack("=Q", SimData.SIZE)
-            f.write(frame_size)
+        with open(file, "wb") as f:
             while self._running:
-                data = q.get()
-                f.write(data)
+                data: Serializable = q.get()
+                data_bytes = data.to_bytes()
+                data_bytes_size = struct.pack("=Q", len(data_bytes))
+                f.write(data_bytes_size)
+                f.write(data_bytes)
 
     def stop(self):
         self._running = False
 
-
 class RecordReader:
+    Q_SIZE = struct.calcsize("=Q")
     @staticmethod
-    def read(record_path: str):
-        with open(record_path, "rb") as f:
-            frame_size = struct.unpack("=Q", f.read(struct.calcsize("=Q")))[0]
+    # TODO: make it so that data_cls identifier is stored within the record
+    def read(file, data_cls: Serializable):
+        with open(file, "rb") as f:
             data = []
             while True:
-                frame_bytes = f.read(frame_size)
-                if not frame_bytes:
+                data_size_bytes = f.read(RecordReader.Q_SIZE)
+                if not data_size_bytes:
                     break
-                data.append(SimData.from_bytes(frame_bytes))
+                data_size = struct.unpack("=Q", data_size_bytes)[0]
+                data_bytes = f.read(data_size)
+                if not data_bytes:
+                    break
+                data.append(data_cls.from_bytes(data_bytes))
             return data

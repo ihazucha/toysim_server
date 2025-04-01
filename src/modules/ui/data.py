@@ -1,20 +1,19 @@
-from numbers import Real
 import numpy as np
 import cv2
 
 from typing import Any
-from time import time_ns
+from time import time_ns, sleep
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage
 
 from modules.messaging import messaging
-from datalink.data import ProcessedData, JPGImageData, RealData
+from datalink.data import ProcessedSimData, ProcessedRealData, JPGImageData, RealData
 from cv2 import imdecode, IMREAD_COLOR
 
 
 class QSimData:
-    def __init__(self, raw: ProcessedData):
+    def __init__(self, raw: ProcessedSimData):
         self.raw = raw
         self.rgb_qimage: QImage = None
         self.depth_qimage: QImage = None
@@ -25,6 +24,7 @@ class QRealData:
     def __init__(self, raw: RealData):
         self.raw = raw
         self.rgb_qimage: QImage = None
+        self.rgb_updated_qimage: QImage = None
         self.processor_period_ns: float = 0
         self.processor_dt_ns: float = 0
 
@@ -56,7 +56,7 @@ class SimDataThread(QThread):
         q_processing = messaging.q_processing.get_consumer()
         last_put_timestamp = time_ns()
         while self._is_running:
-            data: ProcessedData = q_processing.get()
+            data: ProcessedSimData = q_processing.get()
 
             qsim_data = QSimData(raw=data)
             qsim_data.rgb_qimage = npimage2qimage(data.debug_image)
@@ -78,16 +78,19 @@ class VehicleDataThread(QThread):
         self._is_running = True
 
     def run(self):
-        q = messaging.q_real.get_consumer()
+        q = messaging.q_processing.get_consumer()
         while self._is_running:
-            real_data: RealData = RealData.from_bytes(q.get())
+            processed_real_data: ProcessedRealData = q.get()
+            real_data = processed_real_data.original
             jpg_image_data: JPGImageData = real_data.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
             image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
             qimage = npimage2qimage(image_array)
+            updated_qimage = npimage2qimage(processed_real_data.debug_image)
             # TODO: replace with processed data if neccesary
             qvehicle_data = QRealData(real_data)
             qvehicle_data.rgb_qimage = qimage
+            qvehicle_data.rgb_updated_qimage = updated_qimage
             self.data_ready.emit(qvehicle_data)
 
     def stop(self):

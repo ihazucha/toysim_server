@@ -15,6 +15,7 @@ class PurePursuit:
         # Transform waypoints coordinates such that the frame origin is in the rear wheel
         if waypoints.size == 0:
             return 0
+        waypoints = waypoints.copy()
         waypoints[:, 0] += self.waypoint_shift
         look_ahead_distance = np.clip(self.lookahead_factor * speed, self.lookahead_l_min, self.lookahead_l_max)
 

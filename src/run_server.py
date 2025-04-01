@@ -33,10 +33,6 @@ def main():
 
     [p.start() for p in processes]
     [p.join() for p in processes]
-    # [p.terminate() for p in processes]
-
-    # sys.exit(exit_code)
-
 
 if __name__ == "__main__":
     main()
