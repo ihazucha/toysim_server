@@ -50,14 +50,16 @@ class SimDataThread(QThread):
 
     def __init__(self):
         super().__init__()
-        self._is_running = True
 
     def run(self):
         q_processing = messaging.q_processing.get_consumer()
         last_put_timestamp = time_ns()
-        while self._is_running:
-            data: ProcessedSimData = q_processing.get()
-
+        self._is_running = True
+        
+        while self._is_running and not self.isInterruptionRequested():
+            data: ProcessedSimData = q_processing.get(100)
+            if data is None:
+                continue
             qsim_data = QSimData(raw=data)
             qsim_data.rgb_qimage = npimage2qimage(data.debug_image)
             qsim_data.depth_qimage = depth2qimage(data.depth)
@@ -69,18 +71,22 @@ class SimDataThread(QThread):
 
     def stop(self):
         self._is_running = False
+        self.quit()
 
 class VehicleDataThread(QThread):
     data_ready = Signal(QRealData)
 
     def __init__(self):
         super().__init__()
-        self._is_running = True
 
     def run(self):
         q = messaging.q_processing.get_consumer()
-        while self._is_running:
-            processed_real_data: ProcessedRealData = q.get()
+        self._is_running = True
+        
+        while self._is_running and not self.isInterruptionRequested():
+            processed_real_data: ProcessedRealData = q.get(100)
+            if processed_real_data is None:
+                continue
             real_data = processed_real_data.original
             jpg_image_data: JPGImageData = real_data.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
@@ -95,3 +101,4 @@ class VehicleDataThread(QThread):
 
     def stop(self):
         self._is_running = False
+        self.quit()

@@ -107,9 +107,9 @@ class Camera:
 
         self.distortion_coeffs = np.array([0.14946983, -0.36958066, -0.01219314, -0.00706742, 0.19695792])
         # Get optimal camera matrix
-        h, w = image_shape
+        w, h = image_shape
         self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(
-            self.M, self.distortion_coeffs, (w, h), 1, (w, h)
+            self.M, self.distortion_coeffs, (h, w), 1, (h, w)
         )
 
         self.R_rc = self.rotation_matrix()

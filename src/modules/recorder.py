@@ -27,18 +27,31 @@ class RecordWriter:
 
 class RecordReader:
     Q_SIZE = struct.calcsize("=Q")
+
     @staticmethod
     # TODO: make it so that data_cls identifier is stored within the record
-    def read(file, data_cls: Serializable):
+    def read_all(file, data_cls: Serializable):
         with open(file, "rb") as f:
             data = []
             while True:
-                data_size_bytes = f.read(RecordReader.Q_SIZE)
-                if not data_size_bytes:
+                frame = RecordReader._read_one(f, data_cls)
+                if frame is None:
                     break
-                data_size = struct.unpack("=Q", data_size_bytes)[0]
-                data_bytes = f.read(data_size)
-                if not data_bytes:
-                    break
-                data.append(data_cls.from_bytes(data_bytes))
+                data.append(frame)
             return data
+
+    @staticmethod
+    def read_one(file, data_cls: Serializable) -> Serializable | None:
+        with open(file, "rb") as f:
+            return RecordReader._read_one(f, data_cls)
+    
+    @staticmethod
+    def _read_one(file_handle, data_cls: Serializable) -> Serializable | None:
+        frame_size_bytes = file_handle.read(RecordReader.Q_SIZE)
+        if not frame_size_bytes:
+            return None
+        frame_size = struct.unpack("=Q", frame_size_bytes)[0]
+        data_bytes = file_handle.read(frame_size)
+        if not data_bytes:
+            return None
+        return data_cls.from_bytes(data_bytes)

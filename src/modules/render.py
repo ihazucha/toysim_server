@@ -27,7 +27,7 @@ from modules.messaging import messaging
 from utils.paths import icon_path
 
 from modules.ui.sidebar import RecordsSidebar
-from modules.ui.recorder import RecordingThread
+from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
@@ -79,9 +79,9 @@ class RendererMainWindow(QMainWindow):
         self.setWindowIcon(QIcon(icon_path("toysim_icon")))
 
         self._init_tabs()
-        config_sidebar = self._init_config_sidebar()
-        records_sidebar = self._init_records_sidebar()
-        self.top_tool_bar = self._init_top_toolbar(config_sidebar, records_sidebar)
+        self.config_sidebar = self._init_config_sidebar()
+        self.records_sidebar = self._init_records_sidebar()
+        self.top_tool_bar = self._init_top_toolbar(self.config_sidebar, self.records_sidebar)
         self._init_status_bar()
 
         self.showNormal()
@@ -259,26 +259,54 @@ class Renderer:
         t_vehicle_data.data_ready.connect(window.update_real_data)
         window.init_complete.connect(t_vehicle_data.start)
 
-        t_rec = RecordingThread(data_queue=messaging.q_processing)
-        window.init_complete.connect(t_rec.start)
+        t_recorder = RecorderThread(data_queue=messaging.q_processing)
+        window.init_complete.connect(t_recorder.start)
+
+        t_playback = PlaybackThread(data_queue=messaging)
+        window.init_complete.connect(t_playback.start)
 
         threads = [
             t_sim_data,
             t_vehicle_data,
-            t_rec,
+            t_recorder,
+            t_playback
         ]
 
         def stop_threads():
-            # TODO: try to exit gracefully
-            [t.terminate() for t in threads]
-            [t.wait() for t in threads]
+            print("Shutting down threads gracefully...")
+                    
+            for t in threads:
+                if hasattr(t, 'requestInterruption'):
+                    t.requestInterruption()
+            
+            # Give threads time to process the interruption request
+            QApplication.processEvents()
+            
+            for t in threads:
+                if hasattr(t, 'stop'):
+                    try:
+                        t.stop()
+                    except Exception as e:
+                        print(f"Error stopping thread {t}: {e}")
+            
+            # Wait with timeout
+            for t in threads:
+                if not t.wait(1000):  # 1 second timeout
+                    print(f"Thread {t} did not quit in time, forcing termination")
+                    t.terminate()
+                    t.wait()
 
         app.aboutToQuit.connect(stop_threads)
-
+        
         window.init()
-        window.top_tool_bar.record_toggled.connect(t_rec.toggle)
+        window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
+        window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
+        window.records_sidebar.record_selected.connect(t_playback.set_current_record)
+        window.records_sidebar.record_selected.connect(window.top_tool_bar.handle_record_selected)
+
         self.app = app
         self.window = window
+
         if return_window:
             return window
         else:

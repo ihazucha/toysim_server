@@ -56,3 +56,7 @@ computer vision, control theory, and others, combined in compact package for who
     - ability to navigate in timeline fast
 - menu of available controllers
   - controller panel for each controller
+
+Attributions/Sources
+Icons: - put on git/in the thesis
+Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>

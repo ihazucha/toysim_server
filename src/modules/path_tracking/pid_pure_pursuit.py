@@ -1,33 +1,33 @@
 import numpy as np
 
-from datalink.data import PurePursuitPIDConfig
+from datalink.data import PurePursuitConfig
 
 class PurePursuit:
-    def __init__(self, K_dd=PurePursuitPIDConfig.lookahead_factor, wheel_base=310, waypoint_shift=245):
-        self.lookahead_factor = K_dd
-        self.wheel_base = wheel_base
-        self.waypoint_shift = waypoint_shift
+    def __init__(self, config: PurePursuitConfig):
+        self.config = config
         self.filtered_intersections = np.array([])
-        self.lookahead_l_min = PurePursuitPIDConfig.lookahead_l_min
-        self.lookahead_l_max = PurePursuitPIDConfig.lookahead_l_max
+        self.track_point = None
 
     def get_control(self, waypoints: np.ndarray, speed):
-        # Transform waypoints coordinates such that the frame origin is in the rear wheel
+        # Transform waypoints coordinates such that the frame origin is in the rear wheel-base
         if waypoints.size == 0:
             return 0
+        
         waypoints = waypoints.copy()
-        waypoints[:, 0] += self.waypoint_shift
-        look_ahead_distance = np.clip(self.lookahead_factor * speed, self.lookahead_l_min, self.lookahead_l_max)
-
+        waypoints[:, 0] += self.config.waypoint_shift
+        look_ahead_distance = np.clip(self.config.lookahead_factor * speed, self.config.lookahead_dist_min, self.config.lookahead_dist_max)
+        # print(waypoints)
+        # print(look_ahead_distance)
         track_point = self.get_target_point(look_ahead_distance, waypoints)
+        
         if track_point is None:
+            self.track_point = None
             return 0
+        self.track_point = track_point[0] - self.config.waypoint_shift, track_point[1]
 
         alpha = np.arctan2(track_point[1], track_point[0])
-        steer = np.arctan((2 * self.wheel_base * np.sin(alpha)) / look_ahead_distance)
+        steer = np.arctan((2 * self.config.wheel_base * np.sin(alpha)) / look_ahead_distance)
 
-        # TODO: make copy to prevent redo?
-        waypoints[:, 0] -= self.waypoint_shift
         return steer
 
     # Function from https://stackoverflow.com/a/59582674/2609987

@@ -18,7 +18,7 @@ import os
 def run_frames():
     reader = RecordReader()
     path_roadframe = record_path("1743005788249080400")
-    data: list = reader.read(path_roadframe, ProcessedRealData)
+    data: list = reader.read_all(path_roadframe, ProcessedRealData)
 
     dt = 1/30
     counter = 0

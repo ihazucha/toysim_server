@@ -9,6 +9,7 @@ from modules.messaging import messaging
 from datalink.data import (
     ProcessedSimData,
     ProcessedRealData,
+    PurePursuitConfig,
     RealData,
     SimData,
     ControlData,
@@ -23,15 +24,12 @@ from modules.path_planning.red_roadmarks import (
     RoadmarksPlannerConfig,
     Camera,
     HSVColorFilter,
-    rpi_v2_intrinsic_matrix,
     rpi_v2_intrinsic_matrix_from_fov,
     unreal_engine_intrinsic_matrix,
 )
 
 from threading import Thread
 from enum import Enum
-import tkinter as tk
-from tkinter import ttk
 
 
 # TODO: figure out more elegant way to update to avoid blocking
@@ -80,18 +78,16 @@ def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitPID
     for u, v in planner.roadmarks_imgframe:
         cv2.circle(image_copy, (u, v), 5, (0, 255, 0), -1)
 
-    print(f"\r{planner.roadmarks_roadframe[0]}, {planner.roadmarks_roadframe[1]}, {planner.roadmarks_roadframe[2]}", end='')
-    path_imgframe = [planner.camera.xyzw_roadframe2uv(np.array([*xy, 0, 1]))[:2] for xy in planner.path_roadframe]
+    path_imgframe = [
+        planner.camera.xyzw_roadframe2uv(np.array([*xy, 0, 1]))[:2] for xy in planner.path_roadframe
+    ]
     # Planned path
     for i in range(len(path_imgframe) - 1):
         cv2.line(image_copy, path_imgframe[i], path_imgframe[i + 1], (0, 255, 0), 2)
 
     # PurePursuit goal
-    intersections_uv = [
-        planner.camera.xyzw_roadframe2uv(np.array([*xy, 0, 1]))
-        for xy in controller.pp.filtered_intersections
-    ]
-    for u, v in intersections_uv:
+    if controller.pp.track_point:
+        u, v = planner.camera.xyzw_roadframe2uv(np.array([*controller.pp.track_point, 0, 1]))
         cv2.circle(image_copy, (u, v), 5, (255, 255, 255), -1)
         cv2.putText(
             image_copy,
@@ -201,61 +197,53 @@ class Processor(Process):
             )
             q_processing.put(p_data)
 
-
     def _run_real_redroadmarks(self):
         # TODO: obtain data about the camera from the system
         image_shape = (820, 616)
         camera = Camera(
             pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -0.1, 0)),
             image_shape=image_shape,
-            # intrinsic_matrix=rpi_v2_intrinsic_matrix(image_shape=image_shape),
             intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
         )
         config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
         planner = RoadmarksPlanner(camera=camera, filter=HSVColorFilter.new_bright(), config=config)
 
-        ppconfig = PurePursuitPIDConfig(lookahead_l_max=2, lookahead_l_min=0.25)
-        controller = PurePursuitController(config=ppconfig)
+        controller_config = PurePursuitConfig.new_alamak()
+        controller = PurePursuitController(config=controller_config)
         remote_controller = DualSense()
 
         q_control = messaging.q_control.get_producer()
         q_real = messaging.q_real.get_consumer()
         q_processing = messaging.q_processing.get_producer()
 
-        start_apply_ui_config_thread(controller)
-
         # Sync
         _ = RealData.from_bytes(q_real.get())
         remote_controller.connect()
-        import matplotlib.pyplot as plt
 
         while True:
             data: RealData = RealData.from_bytes(q_real.get())
-
-            if remote_controller.is_alive():
-                remote_controller.update()
-            jpg = data.sensor_fusion.camera.jpg
-            img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+            img = cv2.imdecode(
+                np.frombuffer(data.sensor_fusion.camera.jpg, np.uint8), cv2.IMREAD_COLOR
+            )
             img = camera.undistort_image(img)
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            
+
             planner.update(img=img)
             controller.update(path=planner.path_roadframe, speed=data.sensor_fusion.avg_speed)
-            speed = 0.0
 
+            speed = 0.0
             c_data = ControlData(controller.timestamp, speed, controller.steering_angle)
-            if remote_controller.data_ready:
-                if remote_controller.v != 0.0:
+
+            if remote_controller.update():
+                if remote_controller.is_v_nonzero():
                     c_data.speed = remote_controller.v
-                if not (-0.25 < remote_controller.sa < 0.25):
+                if remote_controller.is_sa_nonzero():
                     c_data.steering_angle = -remote_controller.sa
 
             q_control.put(c_data)
 
             debug_image = draw_debug_data(img_rgb, planner, controller)
-
-            # stacked_image = np.hstack((img, debug_image, planner.img_filtered))
-            # cv2.imshow("Original | Debug | Filtered", stacked_image)
-            # cv2.waitKey(0)
 
             p_data = ProcessedRealData(
                 begin_timestamp=q_real.last_get_timestamp, debug_image=debug_image, original=data

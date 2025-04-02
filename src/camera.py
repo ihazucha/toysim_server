@@ -32,7 +32,6 @@ def draw_debug_data(image, planner: RoadmarksPlanner, camera) -> np.ndarray:
         cv2.circle(image_copy, (u, v), 5, (0, 255, 0), -1)
 
     path_imgframe = np.array([camera.xyzw_roadframe2uv(np.array([*xy, 0, 1]))[:2] for xy in planner.path_roadframe])
-    print(f"\r{planner.roadmarks_roadframe[0]}, {planner.roadmarks_roadframe[1]}, {planner.roadmarks_roadframe[2]}", end='')
 
     # Planned path
     for i in range(len(path_imgframe) - 1):
@@ -41,16 +40,16 @@ def draw_debug_data(image, planner: RoadmarksPlanner, camera) -> np.ndarray:
     return image_copy
 
 
-# def plot_roadmarks(roadmarks: np.ndarray, path: np.ndarray):
-#     plt.figure(figsize=(10, 6))
-#     plt.scatter(roadmarks[:, 0], roadmarks[:, 1], color="red", label="Roadmarks")
-#     plt.plot(path[:, 0], path[:, 1], color="blue", label="Fitted Path")
-#     plt.xlabel("X (Road Frame)")
-#     plt.ylabel("Y (Road Frame)")
-#     plt.title("Roadmarks and Fitted Path")
-#     plt.legend()
-#     plt.grid()
-#     plt.show()
+def plot_roadmarks(roadmarks: np.ndarray, path: np.ndarray):
+    plt.figure(figsize=(10, 6))
+    plt.scatter(roadmarks[:, 0], roadmarks[:, 1], color="red", label="Roadmarks")
+    plt.plot(path[:, 0], path[:, 1], color="blue", label="Fitted Path")
+    plt.xlabel("X (Road Frame)")
+    plt.ylabel("Y (Road Frame)")
+    plt.title("Roadmarks and Fitted Path")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
 
 # def visualize_projection_steps(camera: Camera, original_image=None):
@@ -189,12 +188,13 @@ if __name__ == "__main__":
     # path_roadframe = record_path("1743006114457116600")
     # path_roadframe = record_path("1743458155872706100")
     # path_roadframe = record_path("1743459421861391500")
-    path_roadframe = record_path("1743468528428846300")
-    data: list = reader.read(path_roadframe, ProcessedRealData)
+    # path_roadframe = record_path("1743468528428846300")
+    path_roadframe = record_path("1743006114457116600")
+    data: list = reader.read_all(path_roadframe, ProcessedRealData)
 
     image_shape = (820, 616)
     camera = Camera(
-        pose=Pose(position=Position(0, 0.135, 0), rotation=Rotation(0, 0.1, 0)),
+        pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -15.1, 0)),
         image_shape=image_shape,
         intrinsic_matrix=rpi_v2_intrinsic_matrix(image_shape=image_shape),
     )
@@ -210,7 +210,9 @@ if __name__ == "__main__":
             img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
 
             planner.update(img)
-            
+
+            plot_roadmarks(planner.roadmarks_roadframe, planner.path_roadframe)
+
             updated_image = draw_debug_data(img, planner=planner, camera=camera)
             stacked_image = np.hstack((img, updated_image, planner.img_filtered))
             cv2.imshow("Original | Debug | Filtered", stacked_image)
