@@ -326,7 +326,7 @@ class RoadmarksPlanner:
         self.roadmarks_roadframe = np.array(
             [self.camera.image_xyz_roadframe[u, v][:2] for u, v in self.roadmarks_imgframe]
         )
-        self.path_roadframe = self.polyline_fit_path(self.roadmarks_roadframe)
+        self.path_roadframe = self.fit_path_param_cubic_spline(self.roadmarks_roadframe)
 
     def get_roadmark_positions(self, bgr_filtered: np.ndarray) -> np.ndarray:
         # TODO: find better way to detect valid roadmarks
@@ -343,16 +343,16 @@ class RoadmarksPlanner:
             roadmark_centers.append((uc, vc))
         return np.array(roadmark_centers)
 
-    # def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
-    #     coeffs = np.polyfit(x=roadmarks[:, 0], y=roadmarks[:, 1], deg=3)
-    #     f = np.poly1d(coeffs)
-    #     step = abs(roadmarks[-1][0] - roadmarks[0][0]) / 100
-    #     xs = np.arange(roadmarks[0][0], roadmarks[-1][0], step)
-    #     ys = f(xs)
-    #     return np.column_stack((xs, ys))
+    def fit_path_simple_polyline(self, roadmarks: np.ndarray) -> np.ndarray:
+        coeffs = np.polyfit(x=roadmarks[:, 0], y=roadmarks[:, 1], deg=3)
+        f = np.poly1d(coeffs)
+        step = abs(roadmarks[-1][0] - roadmarks[0][0]) / 100
+        xs = np.arange(roadmarks[0][0], roadmarks[-1][0], step)
+        ys = f(xs)
+        return np.column_stack((xs, ys))
 
 
-    def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
+    def fit_path_param_cubic_spline(self, roadmarks: np.ndarray) -> np.ndarray:
         """
         Fits a smooth path through roadmarks using parametric cubic splines.
         Handles complex paths including loops and vertical segments.
@@ -367,40 +367,9 @@ class RoadmarksPlanner:
         if len(roadmarks) < 2:
             return roadmarks
 
-        # Parametric spline representation (handles vertical segments and loops)
         tck, u = splprep([roadmarks[:, 0], roadmarks[:, 1]], s=0, k=min(3, len(roadmarks) - 1))
-
         num_points = 50
         u_new = np.linspace(0, 1, num_points)
         x_spline, y_spline = splev(u_new, tck)
 
         return np.column_stack((x_spline, y_spline))
-
-    # def polyline_fit_path(self, roadmarks: np.ndarray) -> np.ndarray:
-    #     """
-    #     Fits a smooth path through roadmarks using a B-spline approximation.
-    #     Handles complex paths including loops and vertical segments.
-
-    #     Args:
-    #         roadmarks: Nx2 array of (x,y) roadmark coordinates
-
-    #     Returns:
-    #         Nx2 array of points forming a smooth path
-    #     """
-
-    #     if len(roadmarks) < 2:
-    #         return roadmarks
-        
-    #     print(roadmarks)
-
-    #     # Fit a B-spline curve to the roadmarks
-    #     num_points = 100  # Number of points in the resulting smooth path
-
-    #     # Generate a uniform parameterization for the roadmarks
-    #     t = np.linspace(0, 1, len(roadmarks))
-
-    #     # Fit the B-spline
-    #     x_spline = np.interp(np.linspace(0, 1, num_points), t, roadmarks[:, 0])
-    #     y_spline = np.interp(np.linspace(0, 1, num_points), t, roadmarks[:, 1])
-
-    #     return np.column_stack((x_spline, y_spline))

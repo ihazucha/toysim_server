@@ -201,7 +201,7 @@ class Processor(Process):
         # TODO: obtain data about the camera from the system
         image_shape = (820, 616)
         camera = Camera(
-            pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -0.1, 0)),
+            pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -15.1, 0)),
             image_shape=image_shape,
             intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
         )
