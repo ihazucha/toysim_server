@@ -1,14 +1,11 @@
-from copy import deepcopy
-import numpy as np
-
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QVector3D, QFont
-
-from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem, GLTextItem
-from pyqtgraph import Transform3D
-
 import sys
+sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 import numpy as np
+
+from copy import deepcopy
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QVector3D, QFont, QPainter, QColor, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -19,68 +16,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
 )
-from PySide6.QtCore import Qt, QTimer
 
-sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
+from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem, GLTextItem, GLBoxItem
+from pyqtgraph import Transform3D
+
 from modules.ui.plots import Colors
 from datalink.data import Rotation
 
-from pyqtgraph.opengl import GLMeshItem, GLBoxItem, MeshData
-
-# Add this function outside any class
-def create_cylinder_mesh(radius=1.0, height=1.0, segments=20):
-    """Create a cylinder mesh with the given dimensions."""
-    # Create points for top and bottom circles
-    theta = np.linspace(0, 2*np.pi, segments, endpoint=False)
-    
-    # Top circle points (at z = height/2)
-    x_top = radius * np.cos(theta)
-    y_top = radius * np.sin(theta)
-    z_top = np.ones_like(theta) * height/2
-    
-    # Bottom circle points (at z = -height/2)
-    x_bottom = radius * np.cos(theta)
-    y_bottom = radius * np.sin(theta)
-    z_bottom = np.ones_like(theta) * -height/2
-    
-    # Combine all points
-    vertices = []
-    for i in range(segments):
-        # Top circle center
-        vertices.append([0, 0, height/2])
-        # Top circle point i
-        vertices.append([x_top[i], y_top[i], z_top[i]])
-        # Top circle point i+1
-        vertices.append([x_top[(i+1)%segments], y_top[(i+1)%segments], z_top[(i+1)%segments]])
-        
-        # Bottom circle center
-        vertices.append([0, 0, -height/2])
-        # Bottom circle point i+1
-        vertices.append([x_bottom[(i+1)%segments], y_bottom[(i+1)%segments], z_bottom[(i+1)%segments]])
-        # Bottom circle point i
-        vertices.append([x_bottom[i], y_bottom[i], z_bottom[i]])
-        
-        # Side quad (two triangles) 
-        # Triangle 1
-        vertices.append([x_top[i], y_top[i], z_top[i]])
-        vertices.append([x_bottom[i], y_bottom[i], z_bottom[i]])
-        vertices.append([x_bottom[(i+1)%segments], y_bottom[(i+1)%segments], z_bottom[(i+1)%segments]])
-        
-        # Triangle 2
-        vertices.append([x_top[i], y_top[i], z_top[i]])
-        vertices.append([x_bottom[(i+1)%segments], y_bottom[(i+1)%segments], z_bottom[(i+1)%segments]])
-        vertices.append([x_top[(i+1)%segments], y_top[(i+1)%segments], z_top[(i+1)%segments]])
-    
-    # Convert to numpy array
-    vertices = np.array(vertices, dtype=np.float32)
-    
-    # Create colors (one color per vertex)
-    colors = np.ones((len(vertices), 4), dtype=np.float32) * 0.5  # Gray
-    colors[:, 3] = 1.0  # Alpha = 1.0
-    
-    # Create mesh data
-    md = MeshData(vertexes=vertices, vertexColors=colors)
-    return md
 
 class Car3D:
     """Simple 3D car model for the Map3D visualization."""
@@ -161,49 +103,99 @@ class Car3D:
             wheel.setTransform(transform_wheel)
 
 class BasisVectors3D:
-    def __init__(self, parent_widget: GLViewWidget):
+    BASE_FONT_SIZE = 16
+    MIN_FONT_SIZE = 6
+    FONT = QFont("Consolas, Helvetica", BASE_FONT_SIZE)
+
+    def __init__(self, parent_widget: GLViewWidget, name: str):
         self.x = GLLinePlotItem(pos=np.array([[0] * 3, [0.05, 0, 0]]), color=(1, 0, 0, 1), width=3)
         self.y = GLLinePlotItem(pos=np.array([[0] * 3, [0, 0.05, 0]]), color=(0, 1, 0, 1), width=3)
         self.z = GLLinePlotItem(pos=np.array([[0] * 3, [0, 0, 0.05]]), color=(0, 0, 1, 1), width=3)
+        self.xyz_lines = [self.x, self.y, self.z]
 
-        # Create axis labels with improved settings
-        self.base_font_size = 16
-        self.x_label = GLTextItem(pos=np.array([0.06, 0, 0]), text="X(w)", color=(255, 0, 0, 255))
-        self.y_label = GLTextItem(pos=np.array([0, 0.06, 0]), text="Y(w)", color=(0, 255, 0, 255))
-        self.z_label = GLTextItem(pos=np.array([0, 0, 0.06]), text="Z(w)", color=(0, 0, 255, 255))
+        self.x_label = GLTextItem(pos=np.array([0.06, 0, 0]), text=f"X({name})", color=(255, 0, 0, 255))
+        self.y_label = GLTextItem(pos=np.array([0, 0.06, 0]), text=f"Y({name})", color=(0, 255, 0, 255))
+        self.z_label = GLTextItem(pos=np.array([0, 0, 0.06]), text=f"Z({name})", color=(0, 0, 255, 255))
+        self.xyz_labels = [self.x_label, self.y_label, self.z_label]
 
-        if parent_widget:
-            self.add_to_widget(parent_widget)
+        self._add_to_parent_widget(parent_widget)
 
-    def update_font_scaling(self, distance):
-        scale_factor = 2.5
-        font_size = self.base_font_size / (distance * scale_factor)
-        font_size = max(6, font_size)
-        try:
-            for label in [self.x_label, self.y_label, self.z_label]:
-                label.setData(font=QFont("Consolas, Helvetica", int(font_size)))
-        except:
-            pass
+    def _add_to_parent_widget(self, widget: GLViewWidget):
+        for line in self.xyz_lines:
+            widget.addItem(line)
+        for label in self.xyz_labels:
+            widget.addItem(label)
 
-    def add_to_widget(self, widget: GLViewWidget):
-        widget.addItem(self.x)
-        widget.addItem(self.y)
-        widget.addItem(self.z)
-
-        # Add labels
-        widget.addItem(self.x_label)
-        widget.addItem(self.y_label)
-        widget.addItem(self.z_label)
+    def scale_font_by_camera_distance(self, distance: float):
+        scale = 2.5
+        size = self.BASE_FONT_SIZE / (distance * scale)
+        size = max(self.MIN_FONT_SIZE, size)
+        for label in self.xyz_labels:
+            self.FONT.setPointSizeF(size)
+            label.setData(font=self.FONT)
 
     def transform(self, tr: Transform3D):
-        self.x.setTransform(tr)
-        self.y.setTransform(tr)
-        self.z.setTransform(tr)
+        for line in self.xyz_lines:
+            line.setTransform(tr)
+        for label in self.xyz_labels:
+            label.setTransform(tr)
 
-        self.x_label.setTransform(tr)
-        self.y_label.setTransform(tr)
-        self.z_label.setTransform(tr)
 
+class ViewportAxes(QWidget):
+    """Fixed coordinate system display for the bottom left corner that rotates with camera."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(150, 150)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        self.rotation = Transform3D()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Center
+        start_x = self.width() / 2
+        start_y = self.height() / 2
+        
+        axis_length = 50
+        
+        # Draw axis lines - transform the direction vectors through our rotation matrix
+        for axis, color, label in [
+            # (X, Y, Z) World frame == (-Z, X, Y) in Image frame
+            (QVector3D(0, 0, -1), QColor(255, 0, 0), "X"),
+            (QVector3D(1, 0, 0), QColor(0, 255, 0), "Y"),
+            (QVector3D(0, 1, 0), QColor(0, 0, 255), "Z"),
+        ]:
+            # Draw in 2D
+            transformed = self.rotation.map(axis)
+            end_x = start_x + transformed.x() * axis_length
+            end_y = start_y - transformed.y() * axis_length
+            
+            # Line
+            pen = QPen(color=color)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawLine(start_x, start_y, end_x, end_y)
+                        
+            # Label
+            font = painter.font()
+            font.setBold(True)
+            font.setFamily("Consolas, Helvetica")
+            painter.setFont(font)
+            painter.drawText(end_x + 2, end_y + 2, label)
+        
+    def update_rotation(self, glview_widget):
+        """Update rotation based on camera's view matrix."""
+        elevation = glview_widget.opts['elevation']
+        azimuth = glview_widget.opts['azimuth']
+        
+        self.rotation = Transform3D()
+        self.rotation.rotate(azimuth, 0, 1, 0) # Yaw
+        self.rotation.rotate(elevation, 1, 0, 0) # Pitch
+        self.update()
+        
 
 class Map3D(GLViewWidget):
     INIT_POS = QVector3D(0, 0, 0)
@@ -220,8 +212,16 @@ class Map3D(GLViewWidget):
         self.setFocusPolicy(Qt.StrongFocus)
 
         # Reference frames
-        self.world_basis_vectors = BasisVectors3D(parent_widget=self)
-        self.world_basis_vectors.update_font_scaling(distance=Map3D.INIT_DIST)
+        self.world_basis_vectors = BasisVectors3D(parent_widget=self, name="w")
+        self.world_basis_vectors.scale_font_by_camera_distance(distance=Map3D.INIT_DIST)
+        
+        # Add viewport axes in bottom left corner
+        self.viewport_axes = ViewportAxes(self)
+        self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+        self.viewport_axes.update_rotation(self)
+        self.viewport_axes.show()
+        
+        
         # Create car model
         self.car = Car3D(parent_widget=self)
 
@@ -245,6 +245,28 @@ class Map3D(GLViewWidget):
         self.coordinate_label.setAlignment(Qt.AlignCenter)
         self.coordinate_label.setMinimumWidth(150)
         self.coordinate_label.hide()
+
+        # Create center cursor
+        self.center_cursor = QWidget(self)
+        self.center_cursor.setFixedSize(20, 20)
+        self.center_cursor.setAttribute(Qt.WA_TranslucentBackground)
+        self.center_cursor.paintEvent = self._paint_center_cursor
+        self.center_cursor_enabled = False
+        self.center_cursor.hide()
+
+        # Center coordinates label
+        self.center_coordinates_label = QLabel(self)
+        self.center_coordinates_label.setStyleSheet(
+            """
+            background-color: rgba(0, 0, 0, 120); 
+            color: white; 
+            padding: 5px;
+            border-radius: 3px;
+            """
+        )
+        self.center_coordinates_label.setAlignment(Qt.AlignCenter)
+        self.center_coordinates_label.setMinimumWidth(150)
+        self.center_coordinates_label.hide()
 
     # Add methods to control the car
     def move_car(self, x, y, heading=None):
@@ -274,14 +296,21 @@ class Map3D(GLViewWidget):
         if self._top_down_view_enabled:
             self._store_camera_state()
             self.setCameraPosition(elevation=90, azimuth=180)
-            # Enable mouse tracking to get coordinates without clicking
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.CrossCursor)
+            self.coordinate_label.show()
+            # Show center cursor in top-down view
+            self._update_center_cursor()
+            self.center_cursor.show()
+            self.center_coordinates_label.show()
         else:
             self._restore_camera_state()
-            # Hide coordinate display
-            self.coordinate_label.hide()
+            self.setMouseTracking(False)
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.coordinate_label.hide()
+            # Hide center cursor when not in top-down view
+            self.center_cursor.hide()
+            self.center_coordinates_label.hide()
 
     def _store_camera_state(self):
         self._stored_camera_state = deepcopy(self.opts)
@@ -298,6 +327,7 @@ class Map3D(GLViewWidget):
 
     def mouseMoveEvent(self, ev):
         # For top-down view only panning and zoom are enabled
+        self.viewport_axes.update_rotation(self)
         if self._top_down_view_enabled:
             # Update coordinate display
             self._update_coordinate_display(ev)
@@ -309,6 +339,8 @@ class Map3D(GLViewWidget):
                 dx = pan_speed * delta.x()
                 dy = pan_speed * delta.y()
                 self.pan(dy, dx, 0)
+                # After panning, update center cursor coordinates
+                self._update_center_cursor()
         else:
             return super().mouseMoveEvent(ev)
 
@@ -320,10 +352,14 @@ class Map3D(GLViewWidget):
     def wheelEvent(self, ev):
         """Override wheel event to update text scaling after zoom."""
         super().wheelEvent(ev)
+        self.viewport_axes.update_rotation(self)
         if self._top_down_view_enabled and ev.position() is not None:
             self._update_coordinate_display(ev)
         if hasattr(self, "world_basis_vectors"):
-            self.world_basis_vectors.update_font_scaling(self.opts["distance"])
+            self.world_basis_vectors.scale_font_by_camera_distance(self.opts["distance"])
+        # Update center cursor coordinates when zooming
+        if self._top_down_view_enabled:
+            self._update_center_cursor()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_T:
@@ -332,57 +368,60 @@ class Map3D(GLViewWidget):
         else:
             super().keyPressEvent(event)
 
+    def resizeEvent(self, event):
+        """Handle resize to reposition viewport axes in bottom left corner."""
+        super().resizeEvent(event)
+        if hasattr(self, 'viewport_axes'):
+            self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+        # Update center cursor position on resize
+        if self._top_down_view_enabled:
+            self._update_center_cursor()
+
     def _update_coordinate_display(self, ev):
         """Calculate and display world coordinates from mouse position."""
-        # Get screen position
         pos = ev.position().toPoint()
-
-        # Calculate world coordinates
         world_x, world_y = self._screen_to_world(pos.x(), pos.y())
 
-        # Update label text
-        self.coordinate_label.setText(f"X: {world_x:.2f}, Y: {world_y:.2f}")
-
-        # Position the label near the cursor but ensure it's visible
+        self.coordinate_label.setText(f"X: {world_x:.3f}, Y: {world_y:.3f}")
+        
         label_x = pos.x() + 15
         label_y = pos.y() - 30
-
-        # Ensure label stays within widget bounds
+        
+        # Stay within widget bounds
         if label_x + self.coordinate_label.width() > self.width():
             label_x = pos.x() - self.coordinate_label.width() - 5
-
         if label_y < 0:
             label_y = pos.y() + 15
 
         self.coordinate_label.move(label_x, label_y)
-        self.coordinate_label.show()
 
     def _screen_to_world(self, screen_x, screen_y):
-        """Convert screen coordinates to world coordinates in top-down view."""
-        width, height = self.width(), self.height()
-        distance = self.opts["distance"]
-
-        # Get the center of the map (assumes the center is at (0, 0) in world coordinates)
-        center = self.opts["center"]
-        center_x, center_y = center.x(), center.y()
-
-        # Calculate the world-space units per screen pixel
-        # This depends on the camera distance (zoom level)
-        scale_factor = distance * (0.1 / 0.3136)  # Adjust this based on your scene scale
-
-        # Calculate normalized screen coordinates (-1 to 1)
-        norm_x = (2.0 * screen_x / width) - 1.0
-        norm_y = 1.0 - (2.0 * screen_y / height)  # Flip Y axis
-
-        # Scale to world coordinates
-        view_width = width / height * scale_factor
-        view_height = scale_factor
-
-        # Calculate world coordinates
-        world_x = (norm_y * view_height) + center_x
-        world_y = (norm_x * view_width) - center_y
-
-        return world_x, -world_y
+        """
+        Convert screen coordinates to world coordinates in top-down view,
+        properly accounting for camera projection and FOV.
+        """
+        viewport_width = self.width()
+        viewport_height = self.height()
+        aspect_ratio = viewport_width / viewport_height
+        
+        camera_distance = self.opts["distance"]
+        camera_center = self.opts["center"]
+        fov = self.opts.get("fov", 60)
+        
+        # Visible ground plane area
+        visible_height = 2.0 * camera_distance * np.tan(np.deg2rad(fov/2))
+        visible_width = visible_height
+        
+        # <-1, 1> Normalized
+        norm_x = (2.0 * screen_x / viewport_width) - 1.0
+        norm_y = 1.0 - (2.0 * screen_y / viewport_height)
+        
+        # World (X, Y) are Viewport (Y, -X)
+        world_x = (camera_center.x() * aspect_ratio) + (norm_y * visible_height / 2.0)
+        world_y = (camera_center.y()) - (norm_x * visible_width / 2.0)
+        
+        # Correct for aspect ratio
+        return world_x / aspect_ratio, world_y
 
     def update_data(self, rotation: Rotation):
         roll, pitch, yaw = (
@@ -392,11 +431,48 @@ class Map3D(GLViewWidget):
         )
 
         transform = Transform3D()
-        transform.rotate(np.rad2deg(roll), 1, 0, 0)  # Rotate around X-axis
-        transform.rotate(np.rad2deg(pitch), 0, 1, 0)  # Rotate around Y-axis
-        transform.rotate(np.rad2deg(yaw), 0, 0, 1)  # Rotate around Z-axis
+        transform.rotate(np.rad2deg(roll), 1, 0, 0)
+        transform.rotate(np.rad2deg(pitch), 0, 1, 0)
+        transform.rotate(np.rad2deg(yaw), 0, 0, 1)
 
         self.world_basis_vectors.transform(transform)
+
+    def _paint_center_cursor(self, event):
+        """Paint crosshair cursor at center of widget."""
+        painter = QPainter(self.center_cursor)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        size = self.center_cursor.width()
+        center = size // 2
+        
+        # Set up pen for crosshair
+        pen = QPen(QColor(255, 0, 0))  # Red crosshair
+        pen.setWidth(2)
+        painter.setPen(pen)
+        
+        # Draw crosshair
+        line_length = 8
+        painter.drawLine(center - line_length, center, center + line_length, center)  # Horizontal
+        painter.drawLine(center, center - line_length, center, center + line_length)  # Vertical
+        
+        # Draw circle
+        painter.drawEllipse(center - 4, center - 4, 8, 8)
+
+    def _update_center_cursor(self):
+        """Update position of center cursor and its coordinate display."""
+        # Position the cursor at the center
+        center_x = self.width() // 2 - self.center_cursor.width() // 2
+        center_y = self.height() // 2 - self.center_cursor.height() // 2
+        self.center_cursor.move(center_x, center_y)
+        
+        # Calculate world coordinates at screen center
+        world_x, world_y = self._screen_to_world(self.width() // 2, self.height() // 2)
+        
+        # Update label text and position
+        self.center_coordinates_label.setText(f"X: {world_x:.3f}, Y: {world_y:.3f}")
+        label_x = center_x - self.center_coordinates_label.width() // 2 + 10
+        label_y = center_y - 30
+        self.center_coordinates_label.move(label_x, label_y)
 
 
 # Demo
