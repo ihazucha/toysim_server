@@ -1,4 +1,4 @@
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -8,6 +8,13 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
 )
 
+class MColors:
+    WHITE = QColor(255, 255, 255, 255)
+    GRAY = (125, 125, 125, 255)
+    RED = QColor(255, 0, 0, 255)
+    GREEN = QColor(0, 255, 0, 255)
+    BLUE = QColor(0, 0, 255, 255)
+    RED_TRANS = QColor(175, 0, 0, 200)
 
 class DefaultMonospaceFont(QFont):
     def __init__(self, size=10):
