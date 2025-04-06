@@ -1,0 +1,616 @@
+import sys
+
+sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
+import numpy as np
+
+from copy import deepcopy
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPainter, QPen
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QSlider,
+    QLabel,
+    QPushButton,
+    QGridLayout,
+    QGroupBox,
+)
+
+from pyqtgraph.opengl import GLViewWidget, GLGridItem
+from pyqtgraph import Transform3D, Vector
+
+from modules.ui.plots import Colors
+from modules.ui.presets import MColors
+from modules.ui.widgets.opengl.models import Car3D
+from modules.ui.widgets.opengl.helpers import BasisVectors3D
+
+
+class ViewportAxes(QWidget):
+    """2D Basis Vectors display"""
+
+    def __init__(self, parent, axis_length=25):
+        self.axis_length = axis_length
+        super().__init__(parent)
+        self.setFixedSize(100, 100)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self.rotation = Transform3D()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = painter.font()
+        font.setBold(True)
+        font.setFamily("Monospace")
+        pen = QPen()
+        pen.setWidth(2)
+        painter.setFont(font)
+
+        start_x = self.width() / 2
+        start_y = self.height() / 2
+
+        # (X, Y, Z) world frame == (-Z, X, Y) image frame
+        axes = [
+            ("X", Vector(0, 0, -1), MColors.RED),
+            ("Y", Vector(1, 0, 0), MColors.GREEN),
+            ("Z", Vector(0, 1, 0), MColors.BLUE),
+        ]
+
+        for label, rotation, color in axes:
+            transformed = self.rotation.map(rotation)
+            end_x = start_x + transformed.x() * self.axis_length
+            end_y = start_y - transformed.y() * self.axis_length
+
+            # Line
+            pen.setColor(color)
+            painter.setPen(pen)
+            painter.drawLine(start_x, start_y, end_x, end_y)
+
+            # Label
+            painter.drawText(end_x - 3.5, end_y - 5, label)
+
+    def update_rotation(self, elevation: float, azimuth: float):
+        """Update rotation based on camera's view matrix."""
+
+        self.rotation = Transform3D()
+        self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
+        self.rotation.rotate(elevation, 1, 0, 0)  # Pitch
+        self.update()
+
+
+class ViewTransition:
+    def __init__(self, animation_callback: callable, total_frames=30):
+        """opts hold the GLView projection (camera) configuration"""
+        self.animation_callback = animation_callback
+        self.total_frames = total_frames
+        self.current_frame = 0
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._animate_view_transition)
+
+        self.origin_opts: dict = None
+        self.target_opts: dict = None
+
+    def set_origin(self, opts: dict):
+        self.origin_opts = deepcopy(opts)
+
+    def set_target(
+        self,
+        opts: dict,
+        center: Vector = None,
+        distance: float = None,
+        elevation: float = None,
+        azimuth: float = None,
+    ):
+        self.target_opts = deepcopy(opts)
+        if center:
+            self.target_opts["center"] = center
+        if distance:
+            self.target_opts["distance"] = distance
+        if elevation:
+            self.target_opts["elevation"] = elevation
+        if azimuth:
+            self.target_opts["azimuth"] = azimuth
+
+    def is_transitioning(self) -> bool:
+        return self.timer.isActive()
+
+    def stop(self):
+        self.timer.stop()
+
+    def start(self, dt_ms: int):
+        self.current_frame = 0
+        self.timer.start(dt_ms)
+
+    def _animate_view_transition(self):
+        """Update camera position for a smooth transition between views."""
+        if self.current_frame >= self.total_frames:
+            self.stop()
+            return
+
+        # Calculate progress and apply easing
+        progress = self.current_frame / self.total_frames
+        eased_progress = 0.5 - 0.5 * np.cos(progress * np.pi)
+
+        # Interpolate
+        new_distance = self._lerp_opt("distance", eased_progress)
+        new_elevation = self._lerp_opt("elevation", eased_progress)
+        new_azimuth = self._lerp_opt("azimuth", eased_progress)
+        new_center = self._lerp_opt("center", eased_progress)
+
+        self.animation_callback(
+            center=new_center, distance=new_distance, elevation=new_elevation, azimuth=new_azimuth
+        )
+        self.current_frame += 1
+
+    def _lerp_opt(self, opt: str, t: float):
+        return self._lerp(self.origin_opts[opt], self.target_opts[opt], t)
+
+    def _lerp(self, start, end, t):
+        """Linear interpolation"""
+        return start + t * (end - start)
+
+
+class CoordinateLabel2D(QLabel):
+    """2D floating coordinate label (e.g. for top-down view)"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setStyleSheet(
+            """
+            background-color: rgba(0, 0, 0, 120); 
+            color: white; 
+            padding: 5px;
+            border-radius: 3px;
+        """
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumWidth(150)
+        self.hide()
+
+    def update_coordinates(self, x: float, y: float):
+        self.setText(f"X: {x:.3f}, Y: {y:.3f}")
+
+    def toggle(self, show: bool):
+        self.show() if show else self.hide()
+
+    def update_position(
+        self, x: int, y: int, x_offset: int = 15, y_offset: int = -30, check_parent_bounds=True
+    ):
+        # Show a lil to the side
+        x += x_offset
+        y += y_offset
+
+        # Stay within widget bounds
+        if check_parent_bounds:
+            if x + self.width() > self.parent().width():
+                x = x - self.width() - 5
+            if y < 0:
+                y = y + 15
+
+        self.move(x, y)
+
+
+class Map3D(GLViewWidget):
+    INIT_OPTS = {
+        "center": Vector(0, 0, 0),
+        "distance": 0.2,
+        "elevation": 30,
+        "azimuth": 135,
+    }
+
+
+    def __init__(self):
+        super().__init__()
+        self.setBackgroundColor(Colors.FOREGROUND)
+        self.setCameraPosition(
+            pos=self.INIT_OPTS["center"],
+            distance=self.INIT_OPTS["distance"],
+            elevation=self.INIT_OPTS["elevation"],
+            azimuth=self.INIT_OPTS["azimuth"],
+        )
+        self._add_grids()
+
+        self._top_down_view_enabled = False
+        self._stored_camera_state = None
+
+        # React to shortcuts without focus
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        # Reference frames
+        self.world_basis_vectors = BasisVectors3D(parent_widget=self, name="W")
+        self.world_basis_vectors.scale_font_by_camera_distance(distance=Map3D.INIT_OPTS["distance"])
+
+        self.viewport_axes = ViewportAxes(self)
+        self.viewport_axes.update_rotation(
+            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+        )
+        self.viewport_axes.show()
+
+        self.car = Car3D(parent_widget=self)
+
+        self.coordinates_label_2d = CoordinateLabel2D(parent=self)
+
+        self.view_transition = ViewTransition(animation_callback=self._animation_callback)
+        self.update_data(rotation=Vector(0, 0, 0))
+
+    # Replace the toggle_top_down_view method with this animation version
+    def toggle_top_down_view(self):
+        """Toggle between top-down view and normal 3D view with animation."""
+        self._top_down_view_enabled = not self._top_down_view_enabled
+
+        # Cancel ongoing animation
+        if self.view_transition.is_transitioning():
+            self.view_transition.stop()
+
+        if self._top_down_view_enabled:
+            self.view_transition.set_origin(self.opts)
+            self.view_transition.set_target(self.opts, elevation=90, azimuth=180)
+            self.setMouseTracking(True)
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.view_transition.set_target(self.view_transition.origin_opts)
+            self.view_transition.set_origin(self.opts)
+            self.setMouseTracking(False)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        self.coordinates_label_2d.toggle(self._top_down_view_enabled)
+
+        self.view_transition.start(dt_ms=16)
+
+    def _animation_callback(
+        self, center: Vector, distance: float, elevation: float, azimuth: float
+    ):
+        self.setCameraPosition(pos=center, distance=distance, elevation=elevation, azimuth=azimuth)
+        self.viewport_axes.update_rotation(
+            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+        )
+        self.world_basis_vectors.scale_font_by_camera_distance(distance)
+
+    def move_car(self, x, y, heading_deg, steering_angle_deg):
+        if hasattr(self, "car"):
+            self.car.update_position(x, y, heading_deg, steering_angle_deg)
+
+    def _add_grids(self):
+        grid_1m = GLGridItem()
+        grid_1m.setSize(x=10, y=10, z=10)
+        grid_1m.setSpacing(x=1, y=1, z=1)
+        self.addItem(grid_1m)
+
+        grid_10cm = GLGridItem()
+        grid_10cm.setSize(x=10, y=10, z=1)
+        grid_10cm.setSpacing(x=0.1, y=0.1, z=0.1)
+        grid_10cm.setColor((255, 255, 255, 25))
+        self.addItem(grid_10cm)
+
+    def mouseMoveEvent(self, ev):
+        self.viewport_axes.update_rotation(
+            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+        )
+        # For top-down view only panning and zoom are enabled
+        if self._top_down_view_enabled:
+            self._update_mouse_position_display(ev)
+            self._top_down_mouse_drag_event(ev)
+        else:
+            return super().mouseMoveEvent(ev)
+
+    def _top_down_mouse_drag_event(self, ev):
+        if ev.buttons() == Qt.LeftButton:
+            delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
+            self._last_mouse_drag_position = ev.position()
+            pan_speed = 0.001 * self.opts["distance"]
+            dx = pan_speed * delta.x()
+            dy = pan_speed * delta.y()
+            self.pan(dy, dx, 0)
+
+    def mousePressEvent(self, ev) -> None:
+        super().mousePressEvent(ev)
+        # Initialize for top-down dragging
+        self._last_mouse_drag_position = ev.position()
+
+    def wheelEvent(self, ev):
+        """Override wheel event to update text scaling after zoom."""
+        super().wheelEvent(ev)
+        self.viewport_axes.update_rotation(
+            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+        )
+        if self._top_down_view_enabled and ev.position() is not None:
+            self._update_mouse_position_display(ev)
+        if hasattr(self, "world_basis_vectors"):
+            self.world_basis_vectors.scale_font_by_camera_distance(self.opts["distance"])
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_T:
+            self.toggle_top_down_view()
+            self.viewport_axes.update_rotation(
+                elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+            )
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def resizeEvent(self, event):
+        """Handle resize to reposition viewport axes in bottom left corner."""
+        super().resizeEvent(event)
+        if hasattr(self, "viewport_axes"):
+            self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+
+    def _update_mouse_position_display(self, ev):
+        pos = ev.position().toPoint()
+        world_x, world_y = self.top_down_screen_to_world(pos.x(), pos.y())
+
+        self.coordinates_label_2d.update_coordinates(x=world_x, y=world_y)
+        self.coordinates_label_2d.update_position(x=pos.x(), y=pos.y())
+
+    def top_down_screen_to_world(self, screen_x, screen_y):
+        viewport_width = self.width()
+        viewport_height = self.height()
+        aspect_ratio = viewport_width / viewport_height
+
+        camera_distance = self.opts["distance"]
+        camera_center = self.opts["center"]
+        fov = self.opts.get("fov", 60)
+
+        # Visible ground plane area
+        visible_height = 2.0 * camera_distance * np.tan(np.deg2rad(fov / 2))
+        visible_width = visible_height
+
+        # <-1, 1> Normalized
+        norm_x = (2.0 * screen_x / viewport_width) - 1.0
+        norm_y = 1.0 - (2.0 * screen_y / viewport_height)
+
+        # World (X, Y) are Viewport (Y, -X)
+        world_x = (camera_center.x() * aspect_ratio) + (norm_y * visible_height / 2.0)
+        world_y = (camera_center.y()) - (norm_x * visible_width / 2.0)
+
+        # Correct for aspect ratio
+        return world_x / aspect_ratio, world_y
+
+    def update_data(self, rotation: Vector):
+        roll, pitch, yaw = (
+            rotation.x(),
+            rotation.y(),
+            rotation.z()
+        )
+        transform = Transform3D()
+        transform.rotate(roll, 1, 0, 0)
+        transform.rotate(pitch, 0, 1, 0)
+        transform.rotate(yaw, 0, 0, 1)
+        self.world_basis_vectors.transform(transform)
+
+
+# Demo
+# -------------------------------------------------------------------------------------------------
+
+
+class ControlPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
+        self.setWindowTitle("3D Controls")
+
+        # Main layout
+        layout = QVBoxLayout(self)
+
+        # Rotation controls
+        rotation_group = QGroupBox("Rotation")
+        rotation_layout = QVBoxLayout(rotation_group)
+        self.roll_slider = self._create_slider_group("Roll", rotation_layout)
+        self.pitch_slider = self._create_slider_group("Pitch", rotation_layout)
+        self.yaw_slider = self._create_slider_group("Yaw", rotation_layout)
+        layout.addWidget(rotation_group)
+
+        # Animation controls
+        animation_group = QGroupBox("Animation")
+        animation_layout = QVBoxLayout(animation_group)
+
+        buttons_layout = QHBoxLayout()
+        animation_layout.addLayout(buttons_layout)
+
+        self.animate_button = QPushButton("Start Animation")
+        self.animate_button.setCheckable(True)
+        buttons_layout.addWidget(self.animate_button)
+
+        reset_button = QPushButton("Reset")
+        buttons_layout.addWidget(reset_button)
+
+        layout.addWidget(animation_group)
+
+        # Car controls
+        car_group = QGroupBox("Car Controls")
+        car_layout = QVBoxLayout(car_group)
+
+        car_sliders_layout = QGridLayout()
+        car_layout.addLayout(car_sliders_layout)
+
+        # X position
+        car_sliders_layout.addWidget(QLabel("X Position:"), 0, 0)
+        self.car_x_slider = QSlider(Qt.Horizontal)
+        self.car_x_slider.setMinimum(-50)
+        self.car_x_slider.setMaximum(50)
+        self.car_x_slider.setValue(0)
+        car_sliders_layout.addWidget(self.car_x_slider, 0, 1)
+
+        # Y position
+        car_sliders_layout.addWidget(QLabel("Y Position:"), 1, 0)
+        self.car_y_slider = QSlider(Qt.Horizontal)
+        self.car_y_slider.setMinimum(-50)
+        self.car_y_slider.setMaximum(50)
+        self.car_y_slider.setValue(0)
+        car_sliders_layout.addWidget(self.car_y_slider, 1, 1)
+
+        # Heading
+        car_sliders_layout.addWidget(QLabel("Heading:"), 2, 0)
+        self.car_heading_slider = QSlider(Qt.Horizontal)
+        self.car_heading_slider.setMinimum(0)
+        self.car_heading_slider.setMaximum(359)
+        self.car_heading_slider.setValue(0)
+        car_sliders_layout.addWidget(self.car_heading_slider, 2, 1)
+
+        # Heading
+        car_sliders_layout.addWidget(QLabel("Steering Angle:"), 3, 0)
+        self.car_steering_angle_slider = QSlider(Qt.Horizontal)
+        self.car_steering_angle_slider.setMinimum(-20)
+        self.car_steering_angle_slider.setMaximum(+20)
+        self.car_steering_angle_slider.setValue(0)
+        car_sliders_layout.addWidget(self.car_steering_angle_slider, 3, 1)
+
+        layout.addWidget(car_group)
+
+        # Connect button signals - these will be connected in the main class
+        self.reset_button = reset_button
+
+        # Size policy
+        self.setMinimumWidth(300)
+
+    def _create_slider_group(self, name, parent_layout):
+        """Create a labeled slider for a rotation axis."""
+        layout = QHBoxLayout()
+        label = QLabel(f"{name}: 0°")
+        label.setMinimumWidth(60)
+
+        slider = QSlider(Qt.Horizontal)
+        slider.setMinimum(-180)
+        slider.setMaximum(180)
+        slider.setValue(0)
+        slider.setTickPosition(QSlider.TicksBelow)
+        slider.setTickInterval(45)
+
+        # Store the associated label
+        slider.valueChanged.connect(lambda val: label.setText(f"{name}: {val}°"))
+
+        layout.addWidget(QLabel(name))
+        layout.addWidget(slider)
+        layout.addWidget(label)
+
+        parent_layout.addLayout(layout)
+        return slider
+
+
+class Map3DDemo(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("3D Visualization Demo")
+        self.resize(1000, 800)
+
+        # Create central widget with only the 3D map
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+
+        # Create 3D map widget (takes full space now)
+        self.map_3d = Map3D()
+        main_layout.addWidget(self.map_3d)
+
+        # Create floating control panel
+        self.control_panel = ControlPanel()
+
+        # Connect controls
+        self.control_panel.roll_slider.valueChanged.connect(self._update_orientation)
+        self.control_panel.pitch_slider.valueChanged.connect(self._update_orientation)
+        self.control_panel.yaw_slider.valueChanged.connect(self._update_orientation)
+
+        self.control_panel.animate_button.clicked.connect(self._toggle_animation)
+        self.control_panel.reset_button.clicked.connect(self._reset_orientation)
+
+        self.control_panel.car_x_slider.valueChanged.connect(self._update_car_position)
+        self.control_panel.car_y_slider.valueChanged.connect(self._update_car_position)
+        self.control_panel.car_heading_slider.valueChanged.connect(self._update_car_position)
+        self.control_panel.car_steering_angle_slider.valueChanged.connect(self._update_car_position)
+
+        # Animation timer
+        self.animation_timer = QTimer()
+        self.animation_timer.timeout.connect(self._update_animation)
+        self.animation_angle = 0
+
+        # Add control panel toggle action
+        toggle_controls_action = self.menuBar().addAction("Toggle Controls")
+        toggle_controls_action.triggered.connect(self._toggle_control_panel)
+        toggle_controls_action.setShortcut("Ctrl+C")
+
+        # Initial update
+        # self._update_orientation()
+
+    def _toggle_control_panel(self):
+        if self.control_panel.isVisible():
+            self.control_panel.hide()
+        else:
+            self.control_panel.show()
+
+    def closeEvent(self, event):
+        # Also close the control panel when the main window is closed
+        self.control_panel.close()
+        super().closeEvent(event)
+
+    # Update the methods to use control_panel's sliders
+    def _update_orientation(self):
+        """Update the 3D view with current rotation values."""
+        rotation = Vector(
+            self.control_panel.roll_slider.value(),
+            self.control_panel.pitch_slider.value(),
+            self.control_panel.yaw_slider.value(),
+        )
+        self.map_3d.update_data(rotation)
+
+    def _update_car_position(self):
+        """Update car position based on slider values."""
+        x = self.control_panel.car_x_slider.value() / 10.0
+        y = self.control_panel.car_y_slider.value() / 10.0
+        heading = self.control_panel.car_heading_slider.value()
+        steering_angle = self.control_panel.car_steering_angle_slider.value()
+        self.map_3d.move_car(x, y, heading, steering_angle)
+
+    def _toggle_animation(self, checked):
+        """Toggle animation on/off."""
+        if checked:
+            self.control_panel.animate_button.setText("Stop Animation")
+            self.animation_timer.start(30)
+            # Disable sliders during animation
+            self.control_panel.roll_slider.setEnabled(False)
+            self.control_panel.pitch_slider.setEnabled(False)
+            self.control_panel.yaw_slider.setEnabled(False)
+        else:
+            self.control_panel.animate_button.setText("Start Animation")
+            self.animation_timer.stop()
+            # Enable sliders after animation
+            self.control_panel.roll_slider.setEnabled(True)
+            self.control_panel.pitch_slider.setEnabled(True)
+            self.control_panel.yaw_slider.setEnabled(True)
+
+    def _update_animation(self):
+        """Update animation frame."""
+        self.animation_angle += 2
+        if self.animation_angle >= 360:
+            self.animation_angle = 0
+
+        # Create a rotation that changes over time
+        rotation = Vector(
+            45 * np.sin(np.deg2rad(self.animation_angle)),
+            45 * np.sin(np.deg2rad(self.animation_angle + 120)),
+            self.animation_angle,
+        )
+
+        # Update slider positions
+        self.control_panel.roll_slider.setValue(int(rotation.x()))
+        self.control_panel.pitch_slider.setValue(int(rotation.y()))
+        self.control_panel.yaw_slider.setValue(int(rotation.z()))
+
+        # Update the 3D view
+        self.map_3d.update_data(rotation)
+
+    def _reset_orientation(self):
+        """Reset to default orientation."""
+        self.control_panel.roll_slider.setValue(0)
+        self.control_panel.pitch_slider.setValue(0)
+        self.control_panel.yaw_slider.setValue(0)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = Map3DDemo()
+    window.show()
+    sys.exit(app.exec())
