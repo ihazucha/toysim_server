@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Tuple
 
 from pyqtgraph.opengl.MeshData import MeshData
 from pyqtgraph.opengl.items.GLMeshItem import GLMeshItem
@@ -71,66 +72,47 @@ class CylinderMesh(MeshData):
         vertices, faces = self._create_cylinder(radius, height, segments)
         super().__init__(vertexes=vertices, faces=faces, *args, **kwargs)
     
-    def _create_cylinder(self, radius, height, segments):
-        """Generate vertices and faces for a cylinder."""
+    def _create_cylinder(self, radius, height, segments) -> Tuple[np.ndarray, np.ndarray]:
+        """Creates Vertices and Faces"""
         vertices = []
         
-        # Create top and bottom center vertices
         bottom_center = [0, 0, 0]
         top_center = [0, 0, height]
-        vertices.append(bottom_center)  # index 0
-        vertices.append(top_center)     # index 1
+        vertices.append(bottom_center)
+        vertices.append(top_center)
         
-        # Create circle vertices for top and bottom
         for i in range(segments):
-            # Calculate angle in radians
             angle = 2 * np.pi * i / segments
-            
-            # Calculate x and y coordinates on unit circle
             x = radius * np.cos(angle)
             y = radius * np.sin(angle)
             
-            # Add bottom and top circle vertices
-            vertices.append([x, y, 0])         # bottom rim
-            vertices.append([x, y, height])    # top rim
+            # Add bottom and top circle rim vertices
+            vertices.append([x, y, 0])
+            vertices.append([x, y, height])
         
-        # Convert to numpy array
         vertices = np.array(vertices)
-        
-        # Create faces
         faces = []
         
-        # Bottom faces (connect bottom center to bottom rim)
+        # Bottom and Top faces (center -> rim)
         for i in range(segments):
-            # Get the indices of the rim vertices
-            current = 2 + i * 2  # index of current bottom vertex
-            next_idx = 2 + ((i + 1) % segments) * 2  # index of next bottom vertex
-            
-            # Add face (counter-clockwise for correct normals)
-            faces.append([0, next_idx, current])
+            vertex = 2 + i * 2
+            next_vertex = 2 + ((i + 1) % segments) * 2
+            faces.append([0, next_vertex, vertex])
+                
+        for i in range(segments):
+            vertex = 3 + i * 2 
+            next_vertex = 3 + ((i + 1) % segments) * 2
+            faces.append([1, vertex, next_vertex])
         
-        # Top faces (connect top center to top rim)
+        # Side faces (top -> bottom rims)
         for i in range(segments):
-            # Get the indices of the rim vertices
-            current = 3 + i * 2  # index of current top vertex
-            next_idx = 3 + ((i + 1) % segments) * 2  # index of next top vertex
-            
-            # Add face (clockwise for correct normals)
-            faces.append([1, current, next_idx])
-        
-        # Side faces (connect top and bottom rims)
-        for i in range(segments):
-            # Get current quad corners
             bottom_current = 2 + i * 2
             bottom_next = 2 + ((i + 1) % segments) * 2
             top_current = bottom_current + 1
             top_next = bottom_next + 1
-            
-            # Add two triangular faces for the quad
             faces.append([bottom_current, bottom_next, top_current])
             faces.append([bottom_next, top_next, top_current])
         
-        # Convert to numpy array
         faces = np.array(faces)
         
         return vertices, faces
@@ -144,7 +126,9 @@ class OpaqueCylinder(GLMeshItem):
                  radius=1.0, 
                  height=1.0, 
                  segments=32, 
-                 color=MColors.WHITE, 
+                 color=MColors.WHITE,
+                 drawEdges=True,
+                 drawFaces=False,
                  *args, **kwargs):
         
         self.radius = radius
@@ -155,11 +139,11 @@ class OpaqueCylinder(GLMeshItem):
             parentItem=parentItem,
             meshdata=CylinderMesh(radius=radius, height=height, segments=segments),
             color=color,
-            drawEdges=True,
-            drawFaces=False,
-            # shader="shaded",
-            smooth=True,  # True for smoother shading on curved surface
-            # glOptions="opaque",
+            drawEdges=drawEdges,
+            drawFaces=drawFaces,
+            shader="shaded",
+            smooth=True,  # Smoother curved surface
+            glOptions="opaque",
             *args,
             **kwargs
         )

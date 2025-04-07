@@ -2,7 +2,7 @@ import sys
 
 sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 import numpy as np
-from typing import Any, Set
+from typing import Any, Iterable, Set
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
@@ -25,8 +25,51 @@ from pyqtgraph import Transform3D, Vector
 
 from modules.ui.plots import Colors
 from modules.ui.presets import MColors
+
+from pyqtgraph.opengl import GLLinePlotItem
+from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from modules.ui.widgets.opengl.models import Car3D
 from modules.ui.widgets.opengl.helpers import BasisVectors3D
+
+
+class PositionLabel2D(QLabel):
+    """2D floating coordinate label (e.g. for top-down view)"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setStyleSheet(
+            """
+            background-color: rgba(0, 0, 0, 120); 
+            color: white; 
+            padding: 5px;
+            border-radius: 3px;
+        """
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumWidth(150)
+        self.hide()
+
+    def update_coordinates(self, x: float, y: float):
+        self.setText(f"X: {x:.3f}, Y: {y:.3f}")
+
+    def toggle(self, show: bool):
+        self.show() if show else self.hide()
+
+    def update_position(
+        self, x: int, y: int, x_offset: int = 15, y_offset: int = -30, check_parent_bounds=True
+    ):
+        # Show a lil to the side
+        x += x_offset
+        y += y_offset
+
+        # Stay within widget bounds
+        if check_parent_bounds:
+            if x + self.width() > self.parent().width():
+                x = x - self.width() - 5
+            if y < 0:
+                y = y + 15
+
+        self.move(x, y)
 
 
 class ViewportAxes(QWidget):
@@ -40,6 +83,15 @@ class ViewportAxes(QWidget):
         self.show()
 
         self.rotation = Transform3D()
+
+    def on_camera_change(self, opts: dict):
+        self.update_rotation(elevation=opts["elevation"], azimuth=opts["azimuth"])
+
+    def update_rotation(self, elevation: float, azimuth: float):
+        self.rotation = Transform3D()
+        self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
+        self.rotation.rotate(elevation, 1, 0, 0)  # Pitch
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -73,15 +125,6 @@ class ViewportAxes(QWidget):
 
             # Label
             painter.drawText(end_x - 3.5, end_y - 5, label)
-
-    def on_camera_change(self, opts: dict):
-        self.update_rotation(elevation=opts["elevation"], azimuth=opts["azimuth"])
-
-    def update_rotation(self, elevation: float, azimuth: float):
-        self.rotation = Transform3D()
-        self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
-        self.rotation.rotate(elevation, 1, 0, 0)  # Pitch
-        self.update()
 
 
 class ViewTransition:
@@ -157,50 +200,138 @@ class ViewTransition:
         return start + t * (end - start)
 
 
-class PositionLabel2D(QLabel):
-    """2D floating coordinate label (e.g. for top-down view)"""
+class ViewMovement:
+    MOVE_SPEED = 0.02
+    SPRINT_MULTIPLIER = 3.0
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setStyleSheet(
-            """
-            background-color: rgba(0, 0, 0, 120); 
-            color: white; 
-            padding: 5px;
-            border-radius: 3px;
-        """
-        )
-        self.setAlignment(Qt.AlignCenter)
-        self.setMinimumWidth(150)
-        self.hide()
+    def __init__(self, apply_movement_callback: callable):
+        self._keys_pressed = set()
+        self._timer = QTimer()
+        self._timer.timeout.connect(apply_movement_callback)
+        self._timer.start(16)
 
-    def update_coordinates(self, x: float, y: float):
-        self.setText(f"X: {x:.3f}, Y: {y:.3f}")
+    def is_key_pressed(self, key) -> bool:
+        return key in self._keys_pressed
 
-    def toggle(self, show: bool):
-        self.show() if show else self.hide()
+    def is_movement_key(self, key) -> bool:
+        return key in [
+            Qt.Key.Key_W,
+            Qt.Key.Key_A,
+            Qt.Key.Key_S,
+            Qt.Key.Key_D,
+            Qt.Key.Key_Q,
+            Qt.Key.Key_E,
+            Qt.Key.Key_Shift,
+            Qt.Key.Key_Control,
+        ]
 
-    def update_position(
-        self, x: int, y: int, x_offset: int = 15, y_offset: int = -30, check_parent_bounds=True
-    ):
-        # Show a lil to the side
-        x += x_offset
-        y += y_offset
+    def set_pressed_key(self, key):
+        self._keys_pressed.add(key)
 
-        # Stay within widget bounds
-        if check_parent_bounds:
-            if x + self.width() > self.parent().width():
-                x = x - self.width() - 5
-            if y < 0:
-                y = y + 15
+    def unset_pressed_key(self, key):
+        if key in self._keys_pressed:
+            self._keys_pressed.remove(key)
 
-        self.move(x, y)
+    def get_speed(self, elevation, azimuth) -> Vector:
+        # Speed + modifiers
+        speed_factor = self.MOVE_SPEED
+        if self.is_key_pressed(Qt.Key.Key_Shift):
+            speed_factor *= self.SPRINT_MULTIPLIER
+        if self.is_key_pressed(Qt.Key.Key_Control):
+            speed_factor /= self.SPRINT_MULTIPLIER
+
+        # Directions
+        forward = self.get_camera_forward_vector(elevation, azimuth)
+        right = self.get_camera_right_vector(azimuth)
+        up = Vector(0, 0, 1)
+
+        speed = Vector(0, 0, 0)
+
+        if self.is_key_pressed(Qt.Key.Key_W):
+            speed += forward
+        if self.is_key_pressed(Qt.Key.Key_S):
+            speed -= forward
+        if self.is_key_pressed(Qt.Key.Key_A):
+            speed -= right
+        if self.is_key_pressed(Qt.Key.Key_D):
+            speed += right
+        if self.is_key_pressed(Qt.Key.Key_Q):
+            speed -= up
+        if self.is_key_pressed(Qt.Key.Key_E):
+            speed += up
+
+        magnitude = speed.length()
+        if magnitude > 0:
+            speed /= magnitude
+            speed *= speed_factor
+            return speed
+
+        return Vector(0, 0, 0)
+
+    def get_camera_forward_vector(self, elevation, azimuth):
+        elevation_rad = np.radians(elevation)
+        azimuth_rad = np.radians(azimuth)
+        x = -np.cos(azimuth_rad) * np.cos(elevation_rad)
+        y = -np.sin(azimuth_rad) * np.cos(elevation_rad)
+        z = -np.sin(elevation_rad)
+        return Vector(x, y, z)
+
+    def get_camera_right_vector(self, azimuth):
+        azimuth_rad = np.radians(azimuth)
+        x = -np.sin(azimuth_rad)
+        y = np.cos(azimuth_rad)
+        z = 0
+        return Vector(x, y, z)
+
+
+class NavigationData:
+    def __init__(self, parent_widget: GLViewWidget):
+        self.parent_widget = parent_widget
+        self.roadmarks = []
+        self.path = None
+
+        self._timer = QTimer()
+        self._timer.timeout.connect(self.play_next_frame)
+        self._timer.start(33)
+
+        from utils.paths import record_path
+        from modules.recorder import RecordReader
+        from datalink.data import ProcessedRealData
+
+        path = record_path("1744064791554416900")
+        self.data: list[ProcessedRealData] = RecordReader.read_all(path, ProcessedRealData) 
+        self.idx = 0
+
+    def play_next_frame(self):
+        rm_data = self.data[self.idx].roadmarks_data
+        self.update(rm_data.roadmarks, rm_data.path)
+        self.idx = (self.idx + 1) % len(self.data)
+
+    def update(self, roadmarks: np.ndarray, path: np.ndarray):
+        self._clear()
+        for rm in roadmarks:
+            mesh = OpaqueCylinder(radius=0.03, height=0.001, drawEdges=False, drawFaces=True)
+            mesh.translate(dx=rm[0], dy=rm[1], dz=0)
+            self.parent_widget.addItem(mesh)
+            self.roadmarks.append(mesh)
+        path3d = np.column_stack((path, np.zeros(path.shape[0])))
+        self.path = GLLinePlotItem(pos=path3d)
+        self.parent_widget.addItem(self.path)
+
+    def _clear(self):
+        if len(self.roadmarks):
+            for rm in self.roadmarks:
+                self.parent_widget.removeItem(rm)
+        if self.path:
+            self.parent_widget.removeItem(self.path)
+        self.roadmarks = []
+        self.path = None
 
 
 class Map3D(GLViewWidget):
     INIT_OPTS = {
         "center": Vector(-0.5, 0.5, 0.5),
-        "distance": 0.2,
+        "distance": 1,
         "elevation": 30,
         "azimuth": 135,
     }
@@ -217,33 +348,24 @@ class Map3D(GLViewWidget):
             elevation=self.INIT_OPTS["elevation"],
             azimuth=self.INIT_OPTS["azimuth"],
         )
-        # React to shortcuts without focus
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.StrongFocus)  # Accept (keyboard) events without focus
 
-
+        # Items
         self._add_grids()
         self.world_origin = BasisVectors3D(parent_widget=self, name="W")
         self.viewport_axes = ViewportAxes(self)
         self.car = Car3D(parent_widget=self)
         self.mouse_position_2d_label = PositionLabel2D(parent=self)
-
-        self._on_camera_change_group: Set[Any] = {
-            self.world_origin,
-            self.viewport_axes,
-            self.car
-        }
+        self.navigationData = NavigationData(self)
+        self._on_camera_change_group: Set[Any] = {self.viewport_axes}
 
         # Views
         self.view_transition = ViewTransition(animation_callback=self._animation_callback)
         self._top_down_view_enabled = False
-        
-        # Movement
-        self._movement_keys_pressed = set()
-        self._movement_timer = QTimer()
-        self._movement_timer.timeout.connect(self._process_movement)
-        self._movement_timer.start(16)
 
-        # self.update_data(rotation=Vector(0, 0, 0))
+        # Movement
+        self.view_movement = ViewMovement(apply_movement_callback=self._view_movement_callback)
+
         self._update_on_camera_change()
 
     # Replace the toggle_top_down_view method with this animation version
@@ -259,10 +381,8 @@ class Map3D(GLViewWidget):
             # Prevent redundant rotations (azimuth increments past 360)
             self.opts["azimuth"] %= 360
             self.view_transition.set_origin(self.opts)
-            target_center = self.center_on_cam_ground_intersect()
-            self.view_transition.set_target(
-                self.opts, elevation=90, azimuth=180, center=target_center
-            )
+            target = self.get_camera_ground_intersection()
+            self.view_transition.set_target(self.opts, elevation=90, azimuth=180, center=target)
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
@@ -275,10 +395,11 @@ class Map3D(GLViewWidget):
 
         self.view_transition.start(dt_ms=16)
 
-    def center_on_cam_ground_intersect(self):
-        direction = self._get_camera_forward_vector()
+    def get_camera_ground_intersection(self):
+        direction = self.view_movement.get_camera_forward_vector(
+            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
+        )
         cam_pos = self.cameraPosition()
-
         # If there's ground to be seen (dir_z < 0)
         if direction.z() < 0:
             distance = -cam_pos.z() / direction.z()
@@ -286,31 +407,8 @@ class Map3D(GLViewWidget):
             intersection_y = cam_pos.y() + distance * direction.y()
             target_center = Vector(intersection_x, intersection_y, self.opts["center"].z())
         else:
-            # Else keep current center
             target_center = self.opts["center"]
         return target_center
-
-    def _animation_callback(
-        self, center: Vector, distance: float, elevation: float, azimuth: float
-    ):
-        self.setCameraPosition(pos=center, distance=distance, elevation=elevation, azimuth=azimuth)
-        self._update_on_camera_change()
-
-    def move_car(self, x, y, heading_deg, steering_angle_deg):
-        if hasattr(self, "car"):
-            self.car.update_position(x, y, heading_deg, steering_angle_deg)
-
-    def _add_grids(self):
-        grid_1m = GLGridItem()
-        grid_1m.setSize(x=10, y=10, z=10)
-        grid_1m.setSpacing(x=1, y=1, z=1)
-        self.addItem(grid_1m)
-
-        grid_10cm = GLGridItem()
-        grid_10cm.setSize(x=10, y=10, z=1)
-        grid_10cm.setSpacing(x=0.1, y=0.1, z=0.1)
-        grid_10cm.setColor((255, 255, 255, 25))
-        self.addItem(grid_10cm)
 
     def mouseMoveEvent(self, ev):
         self.viewport_axes.update_rotation(
@@ -323,15 +421,6 @@ class Map3D(GLViewWidget):
         else:
             return super().mouseMoveEvent(ev)
 
-    def _top_down_mouse_drag_event(self, ev):
-        if ev.buttons() == Qt.LeftButton:
-            delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
-            self._last_mouse_drag_position = ev.position()
-            pan_speed = 0.003 * self.opts["distance"]
-            dx = pan_speed * delta.x()
-            dy = pan_speed * delta.y()
-            self.pan(dy, dx, 0)
-
     def mousePressEvent(self, ev) -> None:
         super().mousePressEvent(ev)
         # Initialize for top-down dragging
@@ -341,6 +430,7 @@ class Map3D(GLViewWidget):
         """Override wheel event to update text scaling after zoom."""
         if self._top_down_view_enabled and ev.position() is not None:
             self._update_mouse_position_display(ev)
+
         self._update_on_camera_change()
         super().wheelEvent(ev)
 
@@ -348,109 +438,74 @@ class Map3D(GLViewWidget):
         """Handle key press events for movement and other controls."""
         key = event.key()
 
-        # Track movement keys
-        if key in [
-            Qt.Key_W,
-            Qt.Key_A,
-            Qt.Key_S,
-            Qt.Key_D,
-            Qt.Key_Q,
-            Qt.Key_E,
-            Qt.Key_Shift,
-            Qt.Key_Control,
-        ]:
-            self._movement_keys_pressed.add(key)
+        if self.view_movement.is_movement_key(key):
+            # View movement
+            self.view_movement.set_pressed_key(key)
             event.accept()
-        # Toggle top-down
         elif key == Qt.Key.Key_T:
+            # Top-down toggle
             self.toggle_top_down_view()
-            self._update_on_camera_change()
             event.accept()
         else:
             super().keyPressEvent(event)
 
+        self._update_on_camera_change()
+
     def keyReleaseEvent(self, event):
         key = event.key()
-        if key in self._movement_keys_pressed:
-            self._movement_keys_pressed.remove(key)
+        if self.view_movement.is_key_pressed(key):
+            self.view_movement.unset_pressed_key(key)
             event.accept()
         else:
             super().keyReleaseEvent(event)
 
-    def _process_movement(self):
-        if not self._movement_keys_pressed or self._top_down_view_enabled:
-            return
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "viewport_axes"):
+            self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
 
-        # Speed + modifiers
-        movement_speed = self.MOVE_SPEED
-        if Qt.Key.Key_Shift in self._movement_keys_pressed:
-            movement_speed *= self.SPRINT_MULTIPLIER
-        if Qt.Key.Key_Control in self._movement_keys_pressed:
-            movement_speed /= self.SPRINT_MULTIPLIER
+    def update_data(self, rotation: Vector):
+        roll, pitch, yaw = (rotation.x(), rotation.y(), rotation.z())
+        transform = Transform3D()
+        transform.rotate(roll, 1, 0, 0)
+        transform.rotate(pitch, 0, 1, 0)
+        transform.rotate(yaw, 0, 0, 1)
+        self.world_origin.setTransform(transform)
 
-        # Directions
-        forward = self._get_camera_forward_vector()
-        right = self._get_camera_right_vector()
-        up = Vector(0, 0, 1)
+    def move_car(self, x, y, heading_deg, steering_angle_deg):
+        if hasattr(self, "car"):
+            self.car.update(x, y, heading_deg, steering_angle_deg)
 
-        move_direction = Vector(0, 0, 0)
+    def _top_down_mouse_drag_event(self, ev):
+        if ev.buttons() == Qt.LeftButton:
+            delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
+            self._last_mouse_drag_position = ev.position()
+            pan_speed = 0.003 * self.opts["distance"]
+            dx = pan_speed * delta.x()
+            dy = pan_speed * delta.y()
+            self.pan(dy, dx, 0)
 
-        if Qt.Key_W in self._movement_keys_pressed:
-            move_direction += forward
-        if Qt.Key_S in self._movement_keys_pressed:
-            move_direction -= forward
-        if Qt.Key_A in self._movement_keys_pressed:
-            move_direction -= right
-        if Qt.Key_D in self._movement_keys_pressed:
-            move_direction += right
-        if Qt.Key_Q in self._movement_keys_pressed:
-            move_direction -= up
-        if Qt.Key_E in self._movement_keys_pressed:
-            move_direction += up
+    def _view_movement_callback(self):
+        speed = self.view_movement.get_speed(self.opts["elevation"], self.opts["azimuth"])
+        self.setCameraPosition(pos=self.opts["center"] + speed)
+        self._update_on_camera_change()
 
-        length = move_direction.length()
-
-        if length > 0:
-            move_direction /= length
-            move_direction *= movement_speed
-
-            new_center = self.opts["center"] + move_direction
-            self.setCameraPosition(pos=new_center)
-            self._update_on_camera_change()
-
-    def _get_camera_forward_vector(self):
-        azimuth_rad = np.radians(self.opts["azimuth"])
-        elevation_rad = np.radians(self.opts["elevation"])
-        x = -np.cos(azimuth_rad) * np.cos(elevation_rad)
-        y = -np.sin(azimuth_rad) * np.cos(elevation_rad)
-        z = -np.sin(elevation_rad)
-        return Vector(x, y, z)
-
-    def _get_camera_right_vector(self):
-        azimuth_rad = np.radians(self.opts["azimuth"])
-        x = -np.sin(azimuth_rad)
-        y = np.cos(azimuth_rad)
-        z = 0
-        return Vector(x, y, z)
+    def _animation_callback(self, center, distance, elevation, azimuth):
+        self.setCameraPosition(pos=center, distance=distance, elevation=elevation, azimuth=azimuth)
+        self._update_on_camera_change()
 
     def _update_on_camera_change(self):
         for item in self._on_camera_change_group:
             item.on_camera_change(self.opts)
 
-    def resizeEvent(self, event):
-        """Reposition viewport axes in bottom left corner."""
-        super().resizeEvent(event)
-        if hasattr(self, "viewport_axes"):
-            self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
-
     def _update_mouse_position_display(self, ev):
         pos = ev.position().toPoint()
-        world_x, world_y = self.top_down_screen_to_world(pos.x(), pos.y())
+        world_x, world_y = self._top_down_screen_to_world(pos.x(), pos.y())
 
         self.mouse_position_2d_label.update_coordinates(x=world_x, y=world_y)
         self.mouse_position_2d_label.update_position(x=pos.x(), y=pos.y())
 
-    def top_down_screen_to_world(self, screen_x, screen_y):
+    def _top_down_screen_to_world(self, screen_x, screen_y):
         viewport_width = self.width()
         viewport_height = self.height()
         aspect_ratio = viewport_width / viewport_height
@@ -474,13 +529,17 @@ class Map3D(GLViewWidget):
         # Correct for aspect ratio
         return world_x / aspect_ratio, world_y
 
-    def update_data(self, rotation: Vector):
-        roll, pitch, yaw = (rotation.x(), rotation.y(), rotation.z())
-        transform = Transform3D()
-        transform.rotate(roll, 1, 0, 0)
-        transform.rotate(pitch, 0, 1, 0)
-        transform.rotate(yaw, 0, 0, 1)
-        self.world_origin.transform(transform)
+    def _add_grids(self):
+        grid_1m = GLGridItem()
+        grid_1m.setSize(x=10, y=10, z=10)
+        grid_1m.setSpacing(x=1, y=1, z=1)
+        self.addItem(grid_1m)
+
+        grid_10cm = GLGridItem()
+        grid_10cm.setSize(x=10, y=10, z=1)
+        grid_10cm.setSpacing(x=0.1, y=0.1, z=0.1)
+        grid_10cm.setColor((255, 255, 255, 25))
+        self.addItem(grid_10cm)
 
 
 # Demo

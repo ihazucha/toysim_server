@@ -9,6 +9,7 @@ from modules.messaging import messaging
 from datalink.data import (
     ProcessedSimData,
     ProcessedRealData,
+    RoadmarksData,
     PurePursuitConfig,
     RealData,
     SimData,
@@ -227,7 +228,6 @@ class Processor(Process):
             )
             img = camera.undistort_image(img)
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            
 
             planner.update(img=img)
             controller.update(path=planner.path_roadframe, speed=data.sensor_fusion.avg_speed)
@@ -245,7 +245,13 @@ class Processor(Process):
 
             debug_image = draw_debug_data(img_rgb, planner, controller)
 
+            rm_data = RoadmarksData(
+                roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe
+            )
             p_data = ProcessedRealData(
-                begin_timestamp=q_real.last_get_timestamp, debug_image=debug_image, original=data
+                begin_timestamp=q_real.last_get_timestamp,
+                debug_image=debug_image,
+                roadmarks_data=rm_data,
+                original=data,
             )
             q_processing.put(p_data)
