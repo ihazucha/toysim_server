@@ -2,7 +2,7 @@ import sys
 
 sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 import numpy as np
-
+from typing import Any, Set
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
@@ -37,6 +37,7 @@ class ViewportAxes(QWidget):
         super().__init__(parent)
         self.setFixedSize(100, 100)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.show()
 
         self.rotation = Transform3D()
 
@@ -73,9 +74,10 @@ class ViewportAxes(QWidget):
             # Label
             painter.drawText(end_x - 3.5, end_y - 5, label)
 
-    def update_rotation(self, elevation: float, azimuth: float):
-        """Update rotation based on camera's view matrix."""
+    def on_camera_change(self, opts: dict):
+        self.update_rotation(elevation=opts["elevation"], azimuth=opts["azimuth"])
 
+    def update_rotation(self, elevation: float, azimuth: float):
         self.rotation = Transform3D()
         self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
         self.rotation.rotate(elevation, 1, 0, 0)  # Pitch
@@ -155,7 +157,7 @@ class ViewTransition:
         return start + t * (end - start)
 
 
-class CoordinateLabel2D(QLabel):
+class PositionLabel2D(QLabel):
     """2D floating coordinate label (e.g. for top-down view)"""
 
     def __init__(self, *args, **kwargs):
@@ -197,12 +199,14 @@ class CoordinateLabel2D(QLabel):
 
 class Map3D(GLViewWidget):
     INIT_OPTS = {
-        "center": Vector(0, 0, 0),
+        "center": Vector(-0.5, 0.5, 0.5),
         "distance": 0.2,
         "elevation": 30,
         "azimuth": 135,
     }
 
+    MOVE_SPEED = 0.01
+    SPRINT_MULTIPLIER = 3.0
 
     def __init__(self):
         super().__init__()
@@ -213,30 +217,34 @@ class Map3D(GLViewWidget):
             elevation=self.INIT_OPTS["elevation"],
             azimuth=self.INIT_OPTS["azimuth"],
         )
-        self._add_grids()
-
-        self._top_down_view_enabled = False
-        self._stored_camera_state = None
-
         # React to shortcuts without focus
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # Reference frames
-        self.world_basis_vectors = BasisVectors3D(parent_widget=self, name="W")
-        self.world_basis_vectors.scale_font_by_camera_distance(distance=Map3D.INIT_OPTS["distance"])
 
+        self._add_grids()
+        self.world_origin = BasisVectors3D(parent_widget=self, name="W")
         self.viewport_axes = ViewportAxes(self)
-        self.viewport_axes.update_rotation(
-            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-        )
-        self.viewport_axes.show()
-
         self.car = Car3D(parent_widget=self)
+        self.mouse_position_2d_label = PositionLabel2D(parent=self)
 
-        self.coordinates_label_2d = CoordinateLabel2D(parent=self)
+        self._on_camera_change_group: Set[Any] = {
+            self.world_origin,
+            self.viewport_axes,
+            self.car
+        }
 
+        # Views
         self.view_transition = ViewTransition(animation_callback=self._animation_callback)
-        self.update_data(rotation=Vector(0, 0, 0))
+        self._top_down_view_enabled = False
+        
+        # Movement
+        self._movement_keys_pressed = set()
+        self._movement_timer = QTimer()
+        self._movement_timer.timeout.connect(self._process_movement)
+        self._movement_timer.start(16)
+
+        # self.update_data(rotation=Vector(0, 0, 0))
+        self._update_on_camera_change()
 
     # Replace the toggle_top_down_view method with this animation version
     def toggle_top_down_view(self):
@@ -248,8 +256,13 @@ class Map3D(GLViewWidget):
             self.view_transition.stop()
 
         if self._top_down_view_enabled:
+            # Prevent redundant rotations (azimuth increments past 360)
+            self.opts["azimuth"] %= 360
             self.view_transition.set_origin(self.opts)
-            self.view_transition.set_target(self.opts, elevation=90, azimuth=180)
+            target_center = self.center_on_cam_ground_intersect()
+            self.view_transition.set_target(
+                self.opts, elevation=90, azimuth=180, center=target_center
+            )
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
@@ -258,18 +271,30 @@ class Map3D(GLViewWidget):
             self.setMouseTracking(False)
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
-        self.coordinates_label_2d.toggle(self._top_down_view_enabled)
+        self.mouse_position_2d_label.toggle(self._top_down_view_enabled)
 
         self.view_transition.start(dt_ms=16)
+
+    def center_on_cam_ground_intersect(self):
+        direction = self._get_camera_forward_vector()
+        cam_pos = self.cameraPosition()
+
+        # If there's ground to be seen (dir_z < 0)
+        if direction.z() < 0:
+            distance = -cam_pos.z() / direction.z()
+            intersection_x = cam_pos.x() + distance * direction.x()
+            intersection_y = cam_pos.y() + distance * direction.y()
+            target_center = Vector(intersection_x, intersection_y, self.opts["center"].z())
+        else:
+            # Else keep current center
+            target_center = self.opts["center"]
+        return target_center
 
     def _animation_callback(
         self, center: Vector, distance: float, elevation: float, azimuth: float
     ):
         self.setCameraPosition(pos=center, distance=distance, elevation=elevation, azimuth=azimuth)
-        self.viewport_axes.update_rotation(
-            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-        )
-        self.world_basis_vectors.scale_font_by_camera_distance(distance)
+        self._update_on_camera_change()
 
     def move_car(self, x, y, heading_deg, steering_angle_deg):
         if hasattr(self, "car"):
@@ -302,7 +327,7 @@ class Map3D(GLViewWidget):
         if ev.buttons() == Qt.LeftButton:
             delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
             self._last_mouse_drag_position = ev.position()
-            pan_speed = 0.001 * self.opts["distance"]
+            pan_speed = 0.003 * self.opts["distance"]
             dx = pan_speed * delta.x()
             dy = pan_speed * delta.y()
             self.pan(dy, dx, 0)
@@ -314,27 +339,106 @@ class Map3D(GLViewWidget):
 
     def wheelEvent(self, ev):
         """Override wheel event to update text scaling after zoom."""
-        super().wheelEvent(ev)
-        self.viewport_axes.update_rotation(
-            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-        )
         if self._top_down_view_enabled and ev.position() is not None:
             self._update_mouse_position_display(ev)
-        if hasattr(self, "world_basis_vectors"):
-            self.world_basis_vectors.scale_font_by_camera_distance(self.opts["distance"])
+        self._update_on_camera_change()
+        super().wheelEvent(ev)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_T:
+        """Handle key press events for movement and other controls."""
+        key = event.key()
+
+        # Track movement keys
+        if key in [
+            Qt.Key_W,
+            Qt.Key_A,
+            Qt.Key_S,
+            Qt.Key_D,
+            Qt.Key_Q,
+            Qt.Key_E,
+            Qt.Key_Shift,
+            Qt.Key_Control,
+        ]:
+            self._movement_keys_pressed.add(key)
+            event.accept()
+        # Toggle top-down
+        elif key == Qt.Key.Key_T:
             self.toggle_top_down_view()
-            self.viewport_axes.update_rotation(
-                elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-            )
+            self._update_on_camera_change()
             event.accept()
         else:
             super().keyPressEvent(event)
 
+    def keyReleaseEvent(self, event):
+        key = event.key()
+        if key in self._movement_keys_pressed:
+            self._movement_keys_pressed.remove(key)
+            event.accept()
+        else:
+            super().keyReleaseEvent(event)
+
+    def _process_movement(self):
+        if not self._movement_keys_pressed or self._top_down_view_enabled:
+            return
+
+        # Speed + modifiers
+        movement_speed = self.MOVE_SPEED
+        if Qt.Key.Key_Shift in self._movement_keys_pressed:
+            movement_speed *= self.SPRINT_MULTIPLIER
+        if Qt.Key.Key_Control in self._movement_keys_pressed:
+            movement_speed /= self.SPRINT_MULTIPLIER
+
+        # Directions
+        forward = self._get_camera_forward_vector()
+        right = self._get_camera_right_vector()
+        up = Vector(0, 0, 1)
+
+        move_direction = Vector(0, 0, 0)
+
+        if Qt.Key_W in self._movement_keys_pressed:
+            move_direction += forward
+        if Qt.Key_S in self._movement_keys_pressed:
+            move_direction -= forward
+        if Qt.Key_A in self._movement_keys_pressed:
+            move_direction -= right
+        if Qt.Key_D in self._movement_keys_pressed:
+            move_direction += right
+        if Qt.Key_Q in self._movement_keys_pressed:
+            move_direction -= up
+        if Qt.Key_E in self._movement_keys_pressed:
+            move_direction += up
+
+        length = move_direction.length()
+
+        if length > 0:
+            move_direction /= length
+            move_direction *= movement_speed
+
+            new_center = self.opts["center"] + move_direction
+            self.setCameraPosition(pos=new_center)
+            self._update_on_camera_change()
+
+    def _get_camera_forward_vector(self):
+        azimuth_rad = np.radians(self.opts["azimuth"])
+        elevation_rad = np.radians(self.opts["elevation"])
+        x = -np.cos(azimuth_rad) * np.cos(elevation_rad)
+        y = -np.sin(azimuth_rad) * np.cos(elevation_rad)
+        z = -np.sin(elevation_rad)
+        return Vector(x, y, z)
+
+    def _get_camera_right_vector(self):
+        azimuth_rad = np.radians(self.opts["azimuth"])
+        x = -np.sin(azimuth_rad)
+        y = np.cos(azimuth_rad)
+        z = 0
+        return Vector(x, y, z)
+
+    def _update_on_camera_change(self):
+        for item in self._on_camera_change_group:
+            item.on_camera_change(self.opts)
+
     def resizeEvent(self, event):
-        """Handle resize to reposition viewport axes in bottom left corner."""
+        """Reposition viewport axes in bottom left corner."""
         super().resizeEvent(event)
         if hasattr(self, "viewport_axes"):
             self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
@@ -343,8 +447,8 @@ class Map3D(GLViewWidget):
         pos = ev.position().toPoint()
         world_x, world_y = self.top_down_screen_to_world(pos.x(), pos.y())
 
-        self.coordinates_label_2d.update_coordinates(x=world_x, y=world_y)
-        self.coordinates_label_2d.update_position(x=pos.x(), y=pos.y())
+        self.mouse_position_2d_label.update_coordinates(x=world_x, y=world_y)
+        self.mouse_position_2d_label.update_position(x=pos.x(), y=pos.y())
 
     def top_down_screen_to_world(self, screen_x, screen_y):
         viewport_width = self.width()
@@ -371,16 +475,12 @@ class Map3D(GLViewWidget):
         return world_x / aspect_ratio, world_y
 
     def update_data(self, rotation: Vector):
-        roll, pitch, yaw = (
-            rotation.x(),
-            rotation.y(),
-            rotation.z()
-        )
+        roll, pitch, yaw = (rotation.x(), rotation.y(), rotation.z())
         transform = Transform3D()
         transform.rotate(roll, 1, 0, 0)
         transform.rotate(pitch, 0, 1, 0)
         transform.rotate(yaw, 0, 0, 1)
-        self.world_basis_vectors.transform(transform)
+        self.world_origin.transform(transform)
 
 
 # Demo

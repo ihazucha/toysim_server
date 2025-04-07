@@ -10,7 +10,13 @@ from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 class Car3D:
     """Simple 3D car visualization"""
 
-    def __init__(self, parent_widget: GLViewWidget, position=Vector(0, 0, 0)):
+    def __init__(
+        self,
+        parent_widget: GLViewWidget,
+        position=Vector(0, 0, 0),
+        heading_deg=0.0,
+        steering_angle_deg=0.0,
+    ):
         """Create a simple car model starting at origin."""
         self.parent_widget = parent_widget
 
@@ -22,11 +28,17 @@ class Car3D:
         track = 0.155
         wheel_radius = 0.03
         wheel_width = 0.02
+        camera_position = Vector(0.185, 0, 0.135)
+
+
         self.wheel_radius = wheel_radius
         self.wheel_width = wheel_width
 
-        self.origin = BasisVectors3D(parent_widget=parent_widget, name="V")
-        self.origin_offset = Vector(0, 0, 0)
+        self.car_origin = BasisVectors3D(parent_widget=parent_widget, name="V", size=0.025)
+        self.car_origin_offset = Vector(0, 0, 0)
+
+        self.camera_origin = BasisVectors3D(parent_widget=parent_widget, name="C", size=0.025)
+        self.camera_origin_offset = camera_position
 
         self.body = GLBoxItem(
             size=Vector(chassis_len, chassis_width, chassis_height), color=MColors.RED_TRANS
@@ -49,48 +61,59 @@ class Car3D:
             self.wheels.append(wheel)
             self.wheel_offsets.append(QVector3D(wx, wy, wz + wheel_radius))
 
-        self.add_to_widget(parent_widget)
+        self._add_items_to_widget()
 
-        self.x = 0
-        self.y = 0
-        self.heading = 0
-        self.update_position(0, 0, 0, 0)
+        self.x = position.x()
+        self.y = position.y()
+        self.heading_deg = 0
+        self.steering_angle_deg = 0
+        self.update_position(self.x, self.y, self.heading_deg, self.steering_angle_deg)
 
-    def add_to_widget(self, widget):
+    def _add_items_to_widget(self):
         """Add all car components to the widget."""
-        widget.addItem(self.body)
+        self.parent_widget.addItem(self.body)
         for wheel in self.wheels:
-            widget.addItem(wheel)
+            self.parent_widget.addItem(wheel)
+
+    def on_camera_change(self, opts: dict):
+        self.car_origin.scale_font_by_camera_position(distance=opts["distance"], center=opts["center"])
+        self.camera_origin.scale_font_by_camera_position(distance=opts["distance"], center=opts["center"])
 
     def update_position(self, x, y, heading_deg, steering_angle_deg):
         """Update the car's position and orientation."""
         self.x = x
         self.y = y
-        self.heading = heading_deg
+        self.heading_deg = heading_deg
+        self.steering_angle_deg = steering_angle_deg
 
-        transform_body = Transform3D()
-        transform_body.translate(x, y, 0)
-        transform_body.rotate(heading_deg, 0, 0, 1)
-        transform_body.translate(self.body_offset)
-        self.body.setTransform(transform_body)
-        
-        transform_origin = Transform3D()
-        transform_origin.translate(x, y, 0)
-        transform_origin.rotate(heading_deg, 0, 0, 1)
-        transform_origin.translate(self.origin_offset)
-        self.origin.transform(transform_origin)
+        t_body = Transform3D()
+        t_body.translate(x, y, 0)
+        t_body.rotate(heading_deg, 0, 0, 1)
+        t_body.translate(self.body_offset)
+        self.body.setTransform(t_body)
+
+        t_car_origin = Transform3D()
+        t_car_origin.translate(x, y, 0)
+        t_car_origin.rotate(heading_deg, 0, 0, 1)
+        t_car_origin.translate(self.car_origin_offset)
+        self.car_origin.transform(t_car_origin)
+
+        t_camera_origin = Transform3D()
+        t_camera_origin.translate(x, y, 0)
+        t_camera_origin.rotate(heading_deg, 0, 0, 1)
+        t_camera_origin.translate(self.camera_origin_offset)
+        self.camera_origin.transform(t_camera_origin)
 
         for i, wheel in enumerate(self.wheels):
-            transform_wheel = Transform3D()
-            transform_wheel.translate(x, y, 0)
-            transform_wheel.rotate(heading_deg, 0, 0, 1)
-            transform_wheel.translate(self.wheel_offsets[i])
+            t_wheel = Transform3D()
+            t_wheel.translate(x, y, 0)
+            t_wheel.rotate(heading_deg, 0, 0, 1)
+            t_wheel.translate(self.wheel_offsets[i])
             if i < 2:
-                transform_wheel.translate(Vector(0, -self.wheel_width/2, 0))
-                transform_wheel.rotate(steering_angle_deg, 0, 0, 1)
-                transform_wheel.translate(Vector(0, self.wheel_width/2, 0))
-            transform_wheel.translate(0, 0, self.wheel_radius)
-            transform_wheel.rotate(90, 1, 0, 0)
-
-            wheel.setTransform(transform_wheel)
+                t_wheel.translate(Vector(0, -self.wheel_width / 2, 0))
+                t_wheel.rotate(steering_angle_deg, 0, 0, 1)
+                t_wheel.translate(Vector(0, self.wheel_width / 2, 0))
+            t_wheel.translate(0, 0, self.wheel_radius)
+            t_wheel.rotate(90, 1, 0, 0)
+            wheel.setTransform(t_wheel)
 
