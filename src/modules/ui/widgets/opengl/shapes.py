@@ -6,6 +6,41 @@ from pyqtgraph.opengl.items.GLMeshItem import GLMeshItem
 
 from modules.ui.presets import MColors
 
+from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
+
+customWorldLight = ShaderProgram('customWorldLight', [
+    VertexShader("""
+        uniform mat4 u_mvp;
+        uniform mat3 u_normal;
+        attribute vec4 a_position;
+        attribute vec3 a_normal;
+        attribute vec4 a_color;
+        varying vec4 v_color;
+        varying vec3 v_normal;
+        void main() {
+            v_normal = normalize(u_normal * a_normal);
+            v_color = a_color;
+            gl_Position = u_mvp * a_position;
+        }
+    """
+    ),
+    FragmentShader("""
+        #ifdef GL_ES
+        precision mediump float;
+        #endif
+        varying vec4 v_color;
+        varying vec3 v_normal;
+        void main() {
+            float p = dot(v_normal, normalize(vec3(1.0, 1.0, 1.0)));
+            p = p < 0. ? 0. : p * 0.8;
+            vec3 rgb = v_color.rgb * (0.2 + p);
+            gl_FragColor = vec4(rgb, v_color.a);
+        }
+    """
+    ),
+])
+
+
 
 class CubeMesh(MeshData):
     VERTEXES = np.array(
@@ -129,6 +164,7 @@ class OpaqueCylinder(GLMeshItem):
                  color=MColors.WHITE,
                  drawEdges=True,
                  drawFaces=False,
+                 shader=customWorldLight,
                  *args, **kwargs):
         
         self.radius = radius
@@ -139,10 +175,11 @@ class OpaqueCylinder(GLMeshItem):
             parentItem=parentItem,
             meshdata=CylinderMesh(radius=radius, height=height, segments=segments),
             color=color,
+            edgeColor=color,
             drawEdges=drawEdges,
             drawFaces=drawFaces,
-            shader="shaded",
-            smooth=True,  # Smoother curved surface
+            shader=shader,
+            smooth=True,
             glOptions="opaque",
             *args,
             **kwargs

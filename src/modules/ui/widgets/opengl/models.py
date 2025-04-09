@@ -1,13 +1,11 @@
 from pyqtgraph import Transform3D, Vector
 from pyqtgraph.opengl import GLViewWidget, GLBoxItem
-from PySide6.QtGui import QVector3D
 
-from modules.ui.presets import MColors
+from modules.ui.presets import MColors, Colors
 from modules.ui.widgets.opengl.helpers import BasisVectors3D
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
+from PySide6.QtGui import QColor
 
-
-# TODO: refactor into datalink
 class CarProps:
     CHASSIS_LENGTH = 0.255
     CHASSIS_WIDTH = 0.155
@@ -39,15 +37,12 @@ class Car3D:
         self.camera_origin = BasisVectors3D(parent_widget=parent_widget, name="C", size=0.025)
         self.camera_origin_offset = CarProps.CAMERA_POS
 
-        self.body = GLBoxItem(
-            size=Vector(
-                CarProps.CHASSIS_LENGTH,
-                CarProps.CHASSIS_WIDTH,
-                CarProps.CHASSIS_HEIGHT,
-            ),
-            color=MColors.RED_TRANS,
+        dimensions = Vector(
+            CarProps.CHASSIS_LENGTH, CarProps.CHASSIS_WIDTH, CarProps.CHASSIS_HEIGHT
         )
-        self.body_offset = Vector(0, -CarProps.CHASSIS_WIDTH / 2, CarProps.WHEEL_RADIUS)
+        self.body = GLBoxItem(size=dimensions, color=Colors.ON_ACCENT)
+        self.body.lineplot.setData(width=2, antialias=True)
+        self.body_offset = Vector(-0.01, -CarProps.CHASSIS_WIDTH / 2, CarProps.WHEEL_RADIUS)
 
         # FL, FR, RL, RR
         self.wheel_offsets = [
@@ -58,7 +53,9 @@ class Car3D:
         ]
         self.wheels = []
         for _ in self.wheel_offsets:
-            wheel = OpaqueCylinder(radius=CarProps.WHEEL_RADIUS, height=CarProps.WHEEL_WIDTH)
+            wheel = OpaqueCylinder(
+                radius=CarProps.WHEEL_RADIUS, height=CarProps.WHEEL_WIDTH, color=QColor(Colors.ON_ACCENT),
+            )
             self.wheels.append(wheel)
 
         self._add_items_to_widget()
@@ -82,7 +79,7 @@ class Car3D:
         for item, offset in [
             (self.body, self.body_offset),
             (self.car_origin, self.car_origin_offset),
-            (self.camera_origin, self.camera_origin_offset)
+            (self.camera_origin, self.camera_origin_offset),
         ]:
             t = Transform3D()
             t.translate(x, y, 0)

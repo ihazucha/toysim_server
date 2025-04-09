@@ -57,6 +57,9 @@ computer vision, control theory, and others, combined in compact package for who
 - menu of available controllers
   - controller panel for each controller
 
-Attributions/Sources
+### Attributions/Sources
 Icons: - put on git/in the thesis
 Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>
+
+pyqtgraph has to be the latest install (from sou
+https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html

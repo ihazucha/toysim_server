@@ -16,9 +16,15 @@ class BasisVectors3D:
         self.parent_widget = parent_widget
         self.name = name
 
-        self.x = GLLinePlotItem(pos=np.array([[0] * 3, [size, 0, 0]]), color=MColors.RED, width=3)
-        self.y = GLLinePlotItem(pos=np.array([[0] * 3, [0, size, 0]]), color=MColors.GREEN, width=3)
-        self.z = GLLinePlotItem(pos=np.array([[0] * 3, [0, 0, size]]), color=MColors.BLUE, width=3)
+        self.x = GLLinePlotItem(
+            pos=np.array([[0] * 3, [size, 0, 0]]), color=MColors.RED, width=3, antialias=True
+        )
+        self.y = GLLinePlotItem(
+            pos=np.array([[0] * 3, [0, size, 0]]), color=MColors.GREEN, width=3, antialias=True
+        )
+        self.z = GLLinePlotItem(
+            pos=np.array([[0] * 3, [0, 0, size]]), color=MColors.BLUE, width=3, antialias=True
+        )
         self.xyz_lines = [self.x, self.y, self.z]
 
         radius = size / 8
@@ -52,4 +58,3 @@ class BasisVectors3D:
 
         widget.addItem(self.origin)
         widget.addItem(self.origin_label)
-

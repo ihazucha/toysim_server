@@ -6,7 +6,7 @@ from typing import Any, Iterable, Set
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtGui import QPainter, QPen, QColor, QVector4D
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -20,13 +20,12 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
-from pyqtgraph.opengl import GLViewWidget, GLGridItem
+from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem
 from pyqtgraph import Transform3D, Vector
 
 from modules.ui.plots import Colors
 from modules.ui.presets import MColors
 
-from pyqtgraph.opengl import GLLinePlotItem
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from modules.ui.widgets.opengl.models import Car3D
 from modules.ui.widgets.opengl.helpers import BasisVectors3D
@@ -89,8 +88,8 @@ class ViewportAxes(QWidget):
 
     def update_rotation(self, elevation: float, azimuth: float):
         self.rotation = Transform3D()
+        self.rotation.rotate(-elevation, 1, 0, 0)  # Pitch
         self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
-        self.rotation.rotate(elevation, 1, 0, 0)  # Pitch
         self.update()
 
     def paintEvent(self, event):
@@ -232,7 +231,7 @@ class ViewMovement:
         if key in self._keys_pressed:
             self._keys_pressed.remove(key)
 
-    def get_speed(self, elevation, azimuth) -> Vector:
+    def get_speed(self, elevation, azimuth, topdown_view=False) -> Vector:
         # Speed + modifiers
         speed_factor = self.MOVE_SPEED
         if self.is_key_pressed(Qt.Key.Key_Shift):
@@ -242,6 +241,10 @@ class ViewMovement:
 
         # Directions
         forward = self.get_camera_forward_vector(elevation, azimuth)
+        if topdown_view:
+            # Make W/S pan up/down
+            forward.setX(-forward.z())
+            forward.setZ(0)
         right = self.get_camera_right_vector(azimuth)
         up = Vector(0, 0, 1)
 
@@ -288,7 +291,16 @@ class NavigationData:
     def __init__(self, parent_widget: GLViewWidget):
         self.parent_widget = parent_widget
         self.roadmarks = []
-        self.path = None
+
+        self.roadmarks_scatter = GLScatterPlotItem(
+            size=10, color=(23 / 255, 155 / 255, 93 / 255, 1)
+        )
+        self.roadmarks_scatter.setDepthValue(1)
+        self.parent_widget.addItem(self.roadmarks_scatter)
+        self.path = GLLinePlotItem(
+            mode="line_strip", color=(23 / 255, 155 / 255, 93 / 255, 1), width=3, antialias=True
+        )
+        self.parent_widget.addItem(self.path)
 
         self._timer = QTimer()
         self._timer.timeout.connect(self.play_next_frame)
@@ -299,7 +311,7 @@ class NavigationData:
         from datalink.data import ProcessedRealData
 
         path = record_path("1744064791554416900")
-        self.data: list[ProcessedRealData] = RecordReader.read_all(path, ProcessedRealData) 
+        self.data: list[ProcessedRealData] = RecordReader.read_all(path, ProcessedRealData)
         self.idx = 0
 
     def play_next_frame(self):
@@ -310,28 +322,28 @@ class NavigationData:
     def update(self, roadmarks: np.ndarray, path: np.ndarray):
         self._clear()
         for rm in roadmarks:
-            mesh = OpaqueCylinder(radius=0.03, height=0.001, drawEdges=False, drawFaces=True)
-            mesh.translate(dx=rm[0], dy=rm[1], dz=0)
+            mesh = OpaqueCylinder(
+                radius=0.02, height=0.001, color=(0.8, 0, 0, 0.2), drawEdges=False, drawFaces=True
+            )
+            mesh.setDepthValue(-1)
+            mesh.translate(dx=rm[0], dy=rm[1], dz=-0.001)
             self.parent_widget.addItem(mesh)
             self.roadmarks.append(mesh)
+        roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
+        self.roadmarks_scatter.setData(pos=roadmarks3d)
         path3d = np.column_stack((path, np.zeros(path.shape[0])))
-        self.path = GLLinePlotItem(pos=path3d)
-        self.parent_widget.addItem(self.path)
+        self.path.setData(pos=path3d)
 
     def _clear(self):
-        if len(self.roadmarks):
-            for rm in self.roadmarks:
-                self.parent_widget.removeItem(rm)
-        if self.path:
-            self.parent_widget.removeItem(self.path)
+        for rm in self.roadmarks:
+            self.parent_widget.removeItem(rm)
         self.roadmarks = []
-        self.path = None
 
 
 class Map3D(GLViewWidget):
     INIT_OPTS = {
         "center": Vector(-0.5, 0.5, 0.5),
-        "distance": 1,
+        "distance": 0.1,
         "elevation": 30,
         "azimuth": 135,
     }
@@ -341,7 +353,7 @@ class Map3D(GLViewWidget):
 
     def __init__(self):
         super().__init__()
-        self.setBackgroundColor(Colors.FOREGROUND)
+        self.setBackgroundColor((10, 10, 10, 255))
         self.setCameraPosition(
             pos=self.INIT_OPTS["center"],
             distance=self.INIT_OPTS["distance"],
@@ -382,6 +394,7 @@ class Map3D(GLViewWidget):
             self.opts["azimuth"] %= 360
             self.view_transition.set_origin(self.opts)
             target = self.get_camera_ground_intersection()
+            target.setZ(self.opts["center"].z())
             self.view_transition.set_target(self.opts, elevation=90, azimuth=180, center=target)
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.CrossCursor)
@@ -405,10 +418,84 @@ class Map3D(GLViewWidget):
             distance = -cam_pos.z() / direction.z()
             intersection_x = cam_pos.x() + distance * direction.x()
             intersection_y = cam_pos.y() + distance * direction.y()
-            target_center = Vector(intersection_x, intersection_y, self.opts["center"].z())
+            target_center = Vector(intersection_x, intersection_y, 0)
         else:
             target_center = self.opts["center"]
+
         return target_center
+
+    def get_mouse_ground_intersection(self, mouse_pos=None):
+        """
+        Calculate the intersection of the mouse ray with the ground (z=0) plane
+        
+        Args:
+            mouse_pos: Optional QPoint position. If None, uses the cursor position
+        
+        Returns:
+            Vector: 3D world position where the mouse ray intersects the ground plane
+            or None if no intersection
+        """
+        # Get mouse position
+        if mouse_pos is None:
+            screen_pos = self.mapFromGlobal(self.cursor().pos())
+            mouse_x, mouse_y = screen_pos.x(), screen_pos.y()
+        else:
+            mouse_x, mouse_y = mouse_pos.x(), mouse_pos.y()
+        
+        # Get viewport dimensions
+        width, height = self.width(), self.height()
+        
+        # Convert mouse position to normalized device coordinates (-1 to 1)
+        ndc_x = (2.0 * mouse_x / width) - 1.0
+        ndc_y = 1.0 - (2.0 * mouse_y / height)
+        
+        # Get camera properties
+        projection = self.projectionMatrix(region=self.getViewport(), viewport=self.getViewport())  # Use current viewport
+        view = self.viewMatrix()
+        
+        # Create combined inverse transform
+        inv_transform = projection * view
+        inv_transform = inv_transform.inverted()[0]  # inverted returns (matrix, success)
+        
+        # Create near and far points in NDC
+        near_point = QVector4D(ndc_x, ndc_y, -1.0, 1.0)  # Near plane
+        far_point = QVector4D(ndc_x, ndc_y, 1.0, 1.0)   # Far plane
+        
+        # Transform to world space
+        near_world = inv_transform.map(near_point)
+        far_world = inv_transform.map(far_point)
+        
+        # Perspective divide
+        if near_world.w() != 0:
+            near_world /= near_world.w()
+        if far_world.w() != 0:
+            far_world /= far_world.w()
+        
+        # Create ray from camera through mouse position
+        ray_origin = Vector(near_world.x(), near_world.y(), near_world.z())
+        ray_direction = Vector(
+            far_world.x() - near_world.x(),
+            far_world.y() - near_world.y(),
+            far_world.z() - near_world.z()
+        )
+        ray_direction.normalize()
+        
+        # Calculate intersection with ground plane (z=0)
+        if abs(ray_direction.z()) < 1e-6:  # Ray is parallel to ground
+            return None
+        
+        t = -ray_origin.z() / ray_direction.z()
+        if t < 0:  # Intersection is behind the camera
+            return None
+        
+        # Calculate intersection point
+        intersection = Vector(
+            ray_origin.x() + ray_direction.x() * t,
+            ray_origin.y() + ray_direction.y() * t,
+            0.0  # On the ground plane
+        )
+        
+        return intersection
 
     def mouseMoveEvent(self, ev):
         self.viewport_axes.update_rotation(
@@ -486,7 +573,9 @@ class Map3D(GLViewWidget):
             self.pan(dy, dx, 0)
 
     def _view_movement_callback(self):
-        speed = self.view_movement.get_speed(self.opts["elevation"], self.opts["azimuth"])
+        speed = self.view_movement.get_speed(
+            self.opts["elevation"], self.opts["azimuth"], self._top_down_view_enabled
+        )
         self.setCameraPosition(pos=self.opts["center"] + speed)
         self._update_on_camera_change()
 
@@ -510,8 +599,8 @@ class Map3D(GLViewWidget):
         viewport_height = self.height()
         aspect_ratio = viewport_width / viewport_height
 
-        camera_distance = self.opts["distance"]
         camera_center = self.opts["center"]
+        camera_distance = self.opts["distance"] + camera_center.z()
         fov = self.opts.get("fov", 60)
 
         # Visible ground plane area
@@ -533,12 +622,13 @@ class Map3D(GLViewWidget):
         grid_1m = GLGridItem()
         grid_1m.setSize(x=10, y=10, z=10)
         grid_1m.setSpacing(x=1, y=1, z=1)
+        grid_1m.setColor((255, 255, 255, 30))
         self.addItem(grid_1m)
 
         grid_10cm = GLGridItem()
         grid_10cm.setSize(x=10, y=10, z=1)
         grid_10cm.setSpacing(x=0.1, y=0.1, z=0.1)
-        grid_10cm.setColor((255, 255, 255, 25))
+        grid_10cm.setColor((255, 255, 255, 15))
         self.addItem(grid_10cm)
 
 
@@ -654,7 +744,7 @@ class Map3DDemo(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("3D Visualization Demo")
-        self.resize(1000, 800)
+        self.resize(800, 600)
 
         # Create central widget with only the 3D map
         central_widget = QWidget()
