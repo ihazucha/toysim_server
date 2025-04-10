@@ -1,20 +1,19 @@
 import numpy as np
 
-from PySide6.QtGui import QFont
-
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLTextItem
 from pyqtgraph import Transform3D, Vector
 
-from modules.ui.presets import MColors
+from modules.ui.presets import MColors, Fonts
 from modules.ui.widgets.opengl.shapes import OpaqueCube
 
 
 class BasisVectors3D:
-    FONT = QFont("Monospace", 8)
 
-    def __init__(self, parent_widget: GLViewWidget, name: str, size=0.05):
+    def __init__(self, parent_widget: GLViewWidget, name: str, abbrev: str = None, size=0.05):
+        assert len(name) > 0, "Come on, you can figure out a 1-letter name"
         self.parent_widget = parent_widget
         self.name = name
+        self.abbrev = abbrev if abbrev else name[0]
 
         self.x = GLLinePlotItem(
             pos=np.array([[0] * 3, [size, 0, 0]]), color=MColors.RED, width=3, antialias=True
@@ -30,7 +29,7 @@ class BasisVectors3D:
         radius = size / 8
         self.origin = OpaqueCube(size=radius)
         self.origin_offset = Vector(*[-radius / 2] * 3)
-        self.origin_label = GLTextItem(pos=self.origin_offset, color=MColors.WHITE, font=self.FONT)
+        self.origin_label = GLTextItem(pos=self.origin_offset, color=MColors.WHITE, font=Fonts.Monospace)
 
         self._add_to_parent_widget(parent_widget)
         self.setTransform(Transform3D())
@@ -50,7 +49,7 @@ class BasisVectors3D:
 
     def _update_origin_label(self):
         p = self.get_position()
-        self.origin_label.setData(text=f"{self.name} ({p.x():.3f}, {p.y():.3f}, {p.z():.3f})")
+        self.origin_label.setData(text=f"{self.abbrev} ({p.x():.3f}, {p.y():.3f}, {p.z():.3f})")
 
     def _add_to_parent_widget(self, widget: GLViewWidget):
         for line in self.xyz_lines:

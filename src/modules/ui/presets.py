@@ -8,17 +8,21 @@ from PySide6.QtWidgets import (
     QGraphicsPixmapItem,
 )
 
+class Fonts:
+    Monospace = QFont("Monospace", 8)
+
 class MColors:
     WHITE = QColor(255, 255, 255, 255)
-    GRAY = (125, 125, 125, 255)
+    GRAY = QColor(125, 125, 125, 255)
+    GRAY_TRANS = QColor(185, 185, 185, 150)
     RED = QColor(255, 40, 40, 255)
     GREEN = QColor(40, 255, 40, 255)
     BLUE = QColor(40, 40, 255, 255)
     BROWN = QColor(119, 49, 19, 255)
     DARK_BROWN = QColor(101, 67, 33, 255)
-    BROWNISH = QColor("#6d593d")
-    GREENISH = QColor("#3d6d59")
-    PURPLISH = QColor("#77332d")
+    PURPLISH = QColor(93, 23, 155, 255)
+    PURPLISH_LIGHT = QColor(136, 97, 170, 255)
+    TURQUOIS = QColor(23, 155, 93, 255)
 
 class Colors:
     PRIMARY = "#202020"

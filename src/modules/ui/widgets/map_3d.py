@@ -2,11 +2,11 @@ import sys
 
 sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 import numpy as np
-from typing import Any, Iterable, Set
+from typing import Any, Set
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QPen, QColor, QVector4D
+from PySide6.QtGui import QPainter, QPen, QVector4D
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -20,11 +20,10 @@ from PySide6.QtWidgets import (
     QGroupBox,
 )
 
-from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem
+from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem, GLTextItem
 from pyqtgraph import Transform3D, Vector
 
-from modules.ui.plots import Colors
-from modules.ui.presets import MColors
+from modules.ui.presets import Fonts, MColors
 
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from modules.ui.widgets.opengl.models import Car3D
@@ -69,6 +68,77 @@ class PositionLabel2D(QLabel):
                 y = y + 15
 
         self.move(x, y)
+
+
+class Label2D(QLabel):
+    """2D floating coordinate label (e.g. for top-down view)"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setStyleSheet(
+            """
+            background-color: rgba(0, 0, 0, 120); 
+            color: white; 
+            padding: 5px;
+            border-radius: 3px;
+        """
+        )
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumWidth(100)
+        self.show()
+
+
+class ReferenceFrameLabel(Label2D):
+    """Label showing the active reference frame with enhanced styling"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setStyleSheet(
+            """
+            background-color: rgba(0, 0, 0, 180); 
+            color: white; 
+            padding: 5px;
+            border-radius: 5px;
+            border: 1px solid rgba(120, 120, 120, 50);
+            font-weight: bold;
+        """
+        )
+
+    def set_name(self, name: str):
+        self.setText(f"📐 {name}")
+
+
+class ReferenceFrames:
+    def __init__(self, parent: GLViewWidget):
+        self.parent = parent
+        self._frames_by_name = dict()
+        self._active: str = None
+
+        self.current_frame_label = ReferenceFrameLabel(parent=self.parent)
+        self.update_label_position()
+
+    # TODO: keep the coordinate_system as BasisVector3D for now
+    # as an upgrade - separate the ref_frame including it's transformation
+    # from the visualization
+    def add(self, ref_frame: BasisVectors3D):
+        name = ref_frame.name
+        assert self._frames_by_name.get(name) is None, f"Ref frame {name} already defined"
+        self._frames_by_name[name] = ref_frame
+
+    def remove(self, name: str):
+        del self._frames_by_name[name]
+
+    def set_active(self, name: str):
+        self._active = name
+        self.current_frame_label.set_name(name)
+
+    def get_active(self) -> BasisVectors3D:
+        return self._frames_by_name[self._active]
+
+    def update_label_position(self):
+        x = 10
+        y = self.parent.height() - self.current_frame_label.height() - 10
+        self.current_frame_label.move(x, y)
 
 
 class ViewportAxes(QWidget):
@@ -292,15 +362,42 @@ class NavigationData:
         self.parent_widget = parent_widget
         self.roadmarks = []
 
-        self.roadmarks_scatter = GLScatterPlotItem(
-            size=10, color=(23 / 255, 155 / 255, 93 / 255, 1)
-        )
+        self.roadmarks_scatter = GLScatterPlotItem(size=10, color=MColors.TURQUOIS.getRgbF())
         self.roadmarks_scatter.setDepthValue(1)
         self.parent_widget.addItem(self.roadmarks_scatter)
-        self.path = GLLinePlotItem(
-            mode="line_strip", color=(23 / 255, 155 / 255, 93 / 255, 1), width=3, antialias=True
-        )
+
+        self.path = GLLinePlotItem(color=MColors.TURQUOIS.getRgbF(), width=3, antialias=True)
         self.parent_widget.addItem(self.path)
+
+    def update(self, roadmarks: np.ndarray, path: np.ndarray):
+        self._clear()
+        for rm in roadmarks:
+            mesh = OpaqueCylinder(
+                radius=0.02,
+                height=0.001,
+                color=MColors.GRAY_TRANS.getRgbF(),
+                drawEdges=False,
+                drawFaces=True,
+            )
+            mesh.setDepthValue(-1)
+            mesh.translate(dx=rm[0], dy=rm[1], dz=-0.001)
+            self.parent_widget.addItem(mesh)
+            self.roadmarks.append(mesh)
+        roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
+        self.roadmarks_scatter.setData(pos=roadmarks3d)
+        path3d = np.column_stack((path, np.zeros(path.shape[0])))
+        self.path.setData(pos=path3d)
+        return self.roadmarks
+
+    def _clear(self):
+        for rm in self.roadmarks:
+            self.parent_widget.removeItem(rm)
+        self.roadmarks = []
+
+
+class NavigationDataPlayer:
+    def __init__(self, update_data_callback: callable):
+        self.update_data_callback = update_data_callback
 
         self._timer = QTimer()
         self._timer.timeout.connect(self.play_next_frame)
@@ -316,36 +413,16 @@ class NavigationData:
 
     def play_next_frame(self):
         rm_data = self.data[self.idx].roadmarks_data
-        self.update(rm_data.roadmarks, rm_data.path)
+        self.update_data_callback(rm_data.roadmarks, rm_data.path)
         self.idx = (self.idx + 1) % len(self.data)
-
-    def update(self, roadmarks: np.ndarray, path: np.ndarray):
-        self._clear()
-        for rm in roadmarks:
-            mesh = OpaqueCylinder(
-                radius=0.02, height=0.001, color=(0.8, 0, 0, 0.2), drawEdges=False, drawFaces=True
-            )
-            mesh.setDepthValue(-1)
-            mesh.translate(dx=rm[0], dy=rm[1], dz=-0.001)
-            self.parent_widget.addItem(mesh)
-            self.roadmarks.append(mesh)
-        roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
-        self.roadmarks_scatter.setData(pos=roadmarks3d)
-        path3d = np.column_stack((path, np.zeros(path.shape[0])))
-        self.path.setData(pos=path3d)
-
-    def _clear(self):
-        for rm in self.roadmarks:
-            self.parent_widget.removeItem(rm)
-        self.roadmarks = []
 
 
 class Map3D(GLViewWidget):
     INIT_OPTS = {
-        "center": Vector(-0.5, 0.5, 0.5),
+        "center": Vector(-1.60, 1.5, 1.8),
         "distance": 0.1,
-        "elevation": 30,
-        "azimuth": 135,
+        "elevation": 35,
+        "azimuth": 145,
     }
 
     MOVE_SPEED = 0.01
@@ -364,12 +441,21 @@ class Map3D(GLViewWidget):
 
         # Items
         self._add_grids()
-        self.world_origin = BasisVectors3D(parent_widget=self, name="W")
+        self.world_origin = BasisVectors3D(parent_widget=self, name="World")
         self.viewport_axes = ViewportAxes(self)
         self.car = Car3D(parent_widget=self)
         self.mouse_position_2d_label = PositionLabel2D(parent=self)
-        self.navigationData = NavigationData(self)
+        self.navigation_data = NavigationData(parent_widget=self)
+        self.navigation_data_player = NavigationDataPlayer(self.update_navigation_data)
+
+        self.ref_frames = ReferenceFrames(parent=self)
+        self.ref_frames.add(self.world_origin)
+        self.ref_frames.add(self.car.car_origin)
+        self.ref_frames.add(self.car.camera_origin)
+        self.ref_frames.set_active(self.world_origin.name)
+
         self._on_camera_change_group: Set[Any] = {self.viewport_axes}
+        self._distance_tracking_group: Set[Any] = set()
 
         # Views
         self.view_transition = ViewTransition(animation_callback=self._animation_callback)
@@ -379,6 +465,57 @@ class Map3D(GLViewWidget):
         self.view_movement = ViewMovement(apply_movement_callback=self._view_movement_callback)
 
         self._update_on_camera_change()
+
+    def update_navigation_data(self, *args, **kwargs):
+        for item in self._distance_tracking_group:
+            self.removeItem(item)
+        self._distance_tracking_group.clear()
+
+        items = self.navigation_data.update(*args, **kwargs)
+
+        elevation = self.opts["elevation"]
+        azimuth = self.opts["azimuth"]
+        center = self.opts["center"]
+
+        azim_rad = np.radians(azimuth)
+        azim_sin, azim_cos = np.sin(azim_rad), np.cos(azim_rad)
+        elev_rad = np.radians(elevation)
+        elev_sin, elev_cos = np.sin(elev_rad), np.cos(elev_rad)
+        abs_azim_sin = abs(azim_sin)
+        abs_elev_sin = abs(elev_sin)
+
+        for i, item in enumerate(items):
+            line = GLLinePlotItem(color=MColors.PURPLISH_LIGHT.getRgbF(), antialias=True)
+            origin_pos = self.ref_frames.get_active().get_position()
+            item_pos = Vector(item.transform().matrix()[:3, 3])
+            line.setData(pos=(origin_pos, item_pos))
+            self.addItem(line)
+            self._distance_tracking_group.add(line)
+
+            item_cam_dist = center.distanceToPoint(item_pos)
+
+            pos_offsets = Vector(item_pos.x(), item_pos.y(), item_pos.z() + 0.05)
+            dis_offsets = Vector(
+                pos_offsets.x()
+                + (0.03 * abs_elev_sin - 0.03 * abs_azim_sin * -abs_elev_sin)
+                * item_cam_dist
+                * -azim_cos,
+                pos_offsets.y() - 0.03 * azim_sin * abs_elev_sin * item_cam_dist,
+                pos_offsets.z() + 0.025 * elev_cos * item_cam_dist,
+            )
+
+            text_pos = GLTextItem(pos=pos_offsets, font=Fonts.Monospace, color=MColors.TURQUOIS)
+            text_pos.setData(text=f"({item_pos.x():.3f}, {item_pos.y():.3f}, {item_pos.z():.3f})")
+            self.addItem(text_pos)
+            self._distance_tracking_group.add(text_pos)
+
+            # Distance label
+            text_dist = GLTextItem(
+                pos=dis_offsets, font=Fonts.Monospace, color=MColors.PURPLISH_LIGHT
+            )
+            text_dist.setData(text=f" {item_pos.distanceToPoint(origin_pos):.3f}")
+            self.addItem(text_dist)
+            self._distance_tracking_group.add(text_dist)
 
     # Replace the toggle_top_down_view method with this animation version
     def toggle_top_down_view(self):
@@ -427,10 +564,10 @@ class Map3D(GLViewWidget):
     def get_mouse_ground_intersection(self, mouse_pos=None):
         """
         Calculate the intersection of the mouse ray with the ground (z=0) plane
-        
+
         Args:
             mouse_pos: Optional QPoint position. If None, uses the cursor position
-        
+
         Returns:
             Vector: 3D world position where the mouse ray intersects the ground plane
             or None if no intersection
@@ -441,60 +578,62 @@ class Map3D(GLViewWidget):
             mouse_x, mouse_y = screen_pos.x(), screen_pos.y()
         else:
             mouse_x, mouse_y = mouse_pos.x(), mouse_pos.y()
-        
+
         # Get viewport dimensions
         width, height = self.width(), self.height()
-        
+
         # Convert mouse position to normalized device coordinates (-1 to 1)
         ndc_x = (2.0 * mouse_x / width) - 1.0
         ndc_y = 1.0 - (2.0 * mouse_y / height)
-        
+
         # Get camera properties
-        projection = self.projectionMatrix(region=self.getViewport(), viewport=self.getViewport())  # Use current viewport
+        projection = self.projectionMatrix(
+            region=self.getViewport(), viewport=self.getViewport()
+        )  # Use current viewport
         view = self.viewMatrix()
-        
+
         # Create combined inverse transform
         inv_transform = projection * view
         inv_transform = inv_transform.inverted()[0]  # inverted returns (matrix, success)
-        
+
         # Create near and far points in NDC
         near_point = QVector4D(ndc_x, ndc_y, -1.0, 1.0)  # Near plane
-        far_point = QVector4D(ndc_x, ndc_y, 1.0, 1.0)   # Far plane
-        
+        far_point = QVector4D(ndc_x, ndc_y, 1.0, 1.0)  # Far plane
+
         # Transform to world space
         near_world = inv_transform.map(near_point)
         far_world = inv_transform.map(far_point)
-        
+
         # Perspective divide
         if near_world.w() != 0:
             near_world /= near_world.w()
         if far_world.w() != 0:
             far_world /= far_world.w()
-        
+
         # Create ray from camera through mouse position
         ray_origin = Vector(near_world.x(), near_world.y(), near_world.z())
         ray_direction = Vector(
             far_world.x() - near_world.x(),
             far_world.y() - near_world.y(),
-            far_world.z() - near_world.z()
+            far_world.z() - near_world.z(),
         )
         ray_direction.normalize()
-        
+
         # Calculate intersection with ground plane (z=0)
         if abs(ray_direction.z()) < 1e-6:  # Ray is parallel to ground
             return None
-        
+
         t = -ray_origin.z() / ray_direction.z()
         if t < 0:  # Intersection is behind the camera
             return None
-        
+
         # Calculate intersection point
         intersection = Vector(
             ray_origin.x() + ray_direction.x() * t,
             ray_origin.y() + ray_direction.y() * t,
-            0.0  # On the ground plane
+            0.0,  # On the ground plane
         )
-        
+
         return intersection
 
     def mouseMoveEvent(self, ev):
@@ -514,7 +653,6 @@ class Map3D(GLViewWidget):
         self._last_mouse_drag_position = ev.position()
 
     def wheelEvent(self, ev):
-        """Override wheel event to update text scaling after zoom."""
         if self._top_down_view_enabled and ev.position() is not None:
             self._update_mouse_position_display(ev)
 
@@ -522,21 +660,33 @@ class Map3D(GLViewWidget):
         super().wheelEvent(ev)
 
     def keyPressEvent(self, event):
-        """Handle key press events for movement and other controls."""
-        key = event.key()
-
-        if self.view_movement.is_movement_key(key):
-            # View movement
-            self.view_movement.set_pressed_key(key)
-            event.accept()
-        elif key == Qt.Key.Key_T:
-            # Top-down toggle
-            self.toggle_top_down_view()
+        if self._custom_keypress_event(event):
             event.accept()
         else:
             super().keyPressEvent(event)
 
         self._update_on_camera_change()
+
+    def _custom_keypress_event(self, event) -> bool:
+        """Custom key maps
+        Returns:
+            bool: True if the key was handled by this function, False otherwise.
+        """
+
+        key = event.key()
+        if self.view_movement.is_movement_key(key):
+            self.view_movement.set_pressed_key(key)
+        elif key == Qt.Key.Key_T:
+            self.toggle_top_down_view()
+        elif key == Qt.Key.Key_1:
+            self.ref_frames.set_active("World")
+        elif key == Qt.Key.Key_2:
+            self.ref_frames.set_active("Vehicle")
+        elif key == Qt.Key.Key_3:
+            self.ref_frames.set_active("Camera")
+        else:
+            return False
+        return True
 
     def keyReleaseEvent(self, event):
         key = event.key()
@@ -548,8 +698,8 @@ class Map3D(GLViewWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "viewport_axes"):
-            self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+        self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+        self.ref_frames.update_label_position()
 
     def update_data(self, rotation: Vector):
         roll, pitch, yaw = (rotation.x(), rotation.y(), rotation.z())
@@ -559,15 +709,11 @@ class Map3D(GLViewWidget):
         transform.rotate(yaw, 0, 0, 1)
         self.world_origin.setTransform(transform)
 
-    def move_car(self, x, y, heading_deg, steering_angle_deg):
-        if hasattr(self, "car"):
-            self.car.update(x, y, heading_deg, steering_angle_deg)
-
     def _top_down_mouse_drag_event(self, ev):
         if ev.buttons() == Qt.LeftButton:
             delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
             self._last_mouse_drag_position = ev.position()
-            pan_speed = 0.003 * self.opts["distance"]
+            pan_speed = 0.005 * self.opts["distance"]
             dx = pan_speed * delta.x()
             dy = pan_speed * delta.y()
             self.pan(dy, dx, 0)
@@ -612,11 +758,16 @@ class Map3D(GLViewWidget):
         norm_y = 1.0 - (2.0 * screen_y / viewport_height)
 
         # World (X, Y) are Viewport (Y, -X)
-        world_x = (camera_center.x() * aspect_ratio) + (norm_y * visible_height / 2.0)
+        world_x = (
+            (camera_center.x() * aspect_ratio) + (norm_y * visible_height / 2.0)
+        ) / aspect_ratio
         world_y = (camera_center.y()) - (norm_x * visible_width / 2.0)
 
-        # Correct for aspect ratio
-        return world_x / aspect_ratio, world_y
+        ref_frame_offset = self.ref_frames.get_active().get_position()
+        ref_frame_x = world_x - ref_frame_offset.x()
+        ref_frame_y = world_y - ref_frame_offset.y()
+
+        return ref_frame_x, ref_frame_y
 
     def _add_grids(self):
         grid_1m = GLGridItem()
@@ -811,7 +962,7 @@ class Map3DDemo(QMainWindow):
         y = self.control_panel.car_y_slider.value() / 10.0
         heading = self.control_panel.car_heading_slider.value()
         steering_angle = self.control_panel.car_steering_angle_slider.value()
-        self.map_3d.move_car(x, y, heading, steering_angle)
+        self.map_3d.car.update(x, y, heading, steering_angle)
 
     def _toggle_animation(self, checked):
         """Toggle animation on/off."""

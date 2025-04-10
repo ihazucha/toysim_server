@@ -31,10 +31,10 @@ class Car3D:
         """Create a simple car model starting at origin."""
         self.parent_widget = parent_widget
 
-        self.car_origin = BasisVectors3D(parent_widget=parent_widget, name="V", size=0.025)
+        self.car_origin = BasisVectors3D(parent_widget, name="Vehicle", size=0.025)
         self.car_origin_offset = Vector(0, 0, 0)
 
-        self.camera_origin = BasisVectors3D(parent_widget=parent_widget, name="C", size=0.025)
+        self.camera_origin = BasisVectors3D(parent_widget, name="Camera", size=0.025)
         self.camera_origin_offset = CarProps.CAMERA_POS
 
         dimensions = Vector(
