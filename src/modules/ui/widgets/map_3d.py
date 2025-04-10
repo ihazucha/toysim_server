@@ -5,8 +5,8 @@ import numpy as np
 from typing import Any, Set
 from copy import deepcopy
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QPen, QVector4D
+from PySide6.QtCore import Qt, QTimer, QPointF
+from PySide6.QtGui import QPainter, QPen, QVector3D
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -114,7 +114,7 @@ class ReferenceFrames:
         self._frames_by_name = dict()
         self._active: str = None
 
-        self.current_frame_label = ReferenceFrameLabel(parent=self.parent)
+        self.active_label = ReferenceFrameLabel(parent=self.parent)
         self.update_label_position()
 
     # TODO: keep the coordinate_system as BasisVector3D for now
@@ -130,15 +130,13 @@ class ReferenceFrames:
 
     def set_active(self, name: str):
         self._active = name
-        self.current_frame_label.set_name(name)
+        self.active_label.set_name(name)
 
     def get_active(self) -> BasisVectors3D:
         return self._frames_by_name[self._active]
 
-    def update_label_position(self):
-        x = 10
-        y = self.parent.height() - self.current_frame_label.height() - 10
-        self.current_frame_label.move(x, y)
+    def update_label_position(self, x=10, y=-10):
+        self.active_label.move(x, self.parent.height() - self.active_label.height() + y)
 
 
 class ViewportAxes(QWidget):
@@ -161,6 +159,9 @@ class ViewportAxes(QWidget):
         self.rotation.rotate(-elevation, 1, 0, 0)  # Pitch
         self.rotation.rotate(azimuth, 0, 1, 0)  # Yaw
         self.update()
+
+    def update_position(self, x=10, y=-10):
+        self.move(x, self.parent().height() - self.height() + y)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -417,6 +418,118 @@ class NavigationDataPlayer:
         self.idx = (self.idx + 1) % len(self.data)
 
 
+class MutiColorGLTextItem(GLTextItem):
+    def __init__(self, parentItem=None, colors: list = [], texts: list = [], **kwds):
+        super().__init__(parentItem, **kwds)
+        self.colors = colors if len(colors) else self.color
+        self.texts = texts
+
+    def setData(self, colors: list = [], texts: list = [], **kwds):
+        assert (
+            len(colors) <= 1 or len(colors) == len(texts)
+        ), "Number of colors has to match texts or be <= 1"
+        
+        if len(colors):
+            self.colors = colors
+        self.texts = texts
+        super().setData(**kwds)
+        self.update()
+
+    def paint(self):
+        if len(self.texts) < 1:
+            return
+        self.setupGLState()
+
+        project = self.compute_projection()
+        vec3 = QVector3D(*self.pos)
+        text_pos = project.map(vec3).toPointF()
+
+        painter = QPainter(self.view())
+        painter.setFont(self.font)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+        )
+
+        x_offsets = [0]
+        for i in range(1, len(self.texts)):
+            x_offsets.append(x_offsets[i - 1] + len(self.texts[i - 1]))
+
+        for i, text in enumerate(self.texts):
+            color = self.colors[i] if len(self.colors) > 1 else self.colors[0]
+            painter.setPen(color)
+            painter.drawText(text_pos + QPointF(0, -i * 14), text)
+        
+        painter.end()
+
+
+class PositionTracker:
+    def __init__(self, parent: GLViewWidget):
+        self.parent = parent
+        self.items = set()
+
+    def add_item(self, item):
+        self.items.add(item)
+
+    def remove_item(self, item):
+        self.items.remove(item)
+
+    def clear_items(self):
+        for item in self.items:
+            self.parent.removeItem(item)
+        self.items.clear()
+
+    def update(self, items, view_opts: dict, origin_position: Vector):
+        self.clear_items()
+
+        elevation = view_opts["elevation"]
+        azimuth = view_opts["azimuth"]
+        center = view_opts["center"]
+
+        azim_rad = np.radians(azimuth)
+        elev_rad = np.radians(elevation)
+        azim_sin, azim_cos = np.sin(azim_rad), np.cos(azim_rad)
+        elev_sin, elev_cos = np.sin(elev_rad), np.cos(elev_rad)
+        abs_azim_sin, abs_azim_cos = abs(azim_sin), abs(azim_cos)
+        abs_elev_sin = abs(elev_sin)
+
+        for item in items:
+            position = Vector(item.transform().matrix()[:3, 3])
+            camera_distance = center.distanceToPoint(position)
+            origin_distance = position.distanceToPoint(origin_position)
+
+            # Distance line
+            line = GLLinePlotItem(color=MColors.PURPLISH_LIGHT.getRgbF(), antialias=True)
+            line.setData(pos=(origin_position, position))
+            self.add_item(line)
+            self.parent.addItem(line)
+
+            # Position label
+            pos_text_pos = Vector(position + Vector(0, 0, 0.05))
+            # pos_text = GLTextItem(pos=pos_text_pos, font=Fonts.Monospace, color=MColors.TURQUOIS)
+            # pos_text.setData(text=f"({position.x():.3f}, {position.y():.3f}, {position.z():.3f})")
+            # self.add_item(pos_text)
+            # self.parent.addItem(pos_text)
+
+
+            # # Distance label
+            # dist_text_offset = Vector(
+            #     0.03 * abs_elev_sin * (1 + abs_azim_sin) * camera_distance * -azim_cos,
+            #     -0.03 * azim_sin * (1 + abs_azim_cos) * abs_elev_sin * camera_distance,
+            #     0.025 * elev_cos * camera_distance,
+            # )
+            # dist_text_pos = Vector(pos_text_pos - dist_text_offset)
+            # text_dist = GLTextItem(
+            #     pos=dist_text_pos, font=Fonts.Monospace, color=MColors.PURPLISH_LIGHT
+            # )
+            # text_dist.setData(text=f" {origin_distance:.3f}")
+            # self.add_item(text_dist)
+            # self.parent.addItem(text_dist)
+
+            multi_label = MutiColorGLTextItem(pos=pos_text_pos, colors=[MColors.TURQUOIS, MColors.PURPLISH_LIGHT], font=Fonts.Monospace)
+            multi_label.setData(texts=[f"({position.x():.3f}, {position.y():.3f}, {position.z():.3f})", f" {origin_distance:.3f}"])
+            self.add_item(multi_label)
+            self.parent.addItem(multi_label)
+
 class Map3D(GLViewWidget):
     INIT_OPTS = {
         "center": Vector(-1.60, 1.5, 1.8),
@@ -455,7 +568,9 @@ class Map3D(GLViewWidget):
         self.ref_frames.set_active(self.world_origin.name)
 
         self._on_camera_change_group: Set[Any] = {self.viewport_axes}
-        self._distance_tracking_group: Set[Any] = set()
+
+        # Item position tracking
+        self.position_tracker = PositionTracker(parent=self)
 
         # Views
         self.view_transition = ViewTransition(animation_callback=self._animation_callback)
@@ -467,57 +582,10 @@ class Map3D(GLViewWidget):
         self._update_on_camera_change()
 
     def update_navigation_data(self, *args, **kwargs):
-        for item in self._distance_tracking_group:
-            self.removeItem(item)
-        self._distance_tracking_group.clear()
-
         items = self.navigation_data.update(*args, **kwargs)
+        origin_position = self.ref_frames.get_active().get_position()
+        self.position_tracker.update(items, self.opts, origin_position)
 
-        elevation = self.opts["elevation"]
-        azimuth = self.opts["azimuth"]
-        center = self.opts["center"]
-
-        azim_rad = np.radians(azimuth)
-        azim_sin, azim_cos = np.sin(azim_rad), np.cos(azim_rad)
-        elev_rad = np.radians(elevation)
-        elev_sin, elev_cos = np.sin(elev_rad), np.cos(elev_rad)
-        abs_azim_sin = abs(azim_sin)
-        abs_elev_sin = abs(elev_sin)
-
-        for i, item in enumerate(items):
-            line = GLLinePlotItem(color=MColors.PURPLISH_LIGHT.getRgbF(), antialias=True)
-            origin_pos = self.ref_frames.get_active().get_position()
-            item_pos = Vector(item.transform().matrix()[:3, 3])
-            line.setData(pos=(origin_pos, item_pos))
-            self.addItem(line)
-            self._distance_tracking_group.add(line)
-
-            item_cam_dist = center.distanceToPoint(item_pos)
-
-            pos_offsets = Vector(item_pos.x(), item_pos.y(), item_pos.z() + 0.05)
-            dis_offsets = Vector(
-                pos_offsets.x()
-                + (0.03 * abs_elev_sin - 0.03 * abs_azim_sin * -abs_elev_sin)
-                * item_cam_dist
-                * -azim_cos,
-                pos_offsets.y() - 0.03 * azim_sin * abs_elev_sin * item_cam_dist,
-                pos_offsets.z() + 0.025 * elev_cos * item_cam_dist,
-            )
-
-            text_pos = GLTextItem(pos=pos_offsets, font=Fonts.Monospace, color=MColors.TURQUOIS)
-            text_pos.setData(text=f"({item_pos.x():.3f}, {item_pos.y():.3f}, {item_pos.z():.3f})")
-            self.addItem(text_pos)
-            self._distance_tracking_group.add(text_pos)
-
-            # Distance label
-            text_dist = GLTextItem(
-                pos=dis_offsets, font=Fonts.Monospace, color=MColors.PURPLISH_LIGHT
-            )
-            text_dist.setData(text=f" {item_pos.distanceToPoint(origin_pos):.3f}")
-            self.addItem(text_dist)
-            self._distance_tracking_group.add(text_dist)
-
-    # Replace the toggle_top_down_view method with this animation version
     def toggle_top_down_view(self):
         """Toggle between top-down view and normal 3D view with animation."""
         self._top_down_view_enabled = not self._top_down_view_enabled
@@ -561,96 +629,12 @@ class Map3D(GLViewWidget):
 
         return target_center
 
-    def get_mouse_ground_intersection(self, mouse_pos=None):
-        """
-        Calculate the intersection of the mouse ray with the ground (z=0) plane
-
-        Args:
-            mouse_pos: Optional QPoint position. If None, uses the cursor position
-
-        Returns:
-            Vector: 3D world position where the mouse ray intersects the ground plane
-            or None if no intersection
-        """
-        # Get mouse position
-        if mouse_pos is None:
-            screen_pos = self.mapFromGlobal(self.cursor().pos())
-            mouse_x, mouse_y = screen_pos.x(), screen_pos.y()
-        else:
-            mouse_x, mouse_y = mouse_pos.x(), mouse_pos.y()
-
-        # Get viewport dimensions
-        width, height = self.width(), self.height()
-
-        # Convert mouse position to normalized device coordinates (-1 to 1)
-        ndc_x = (2.0 * mouse_x / width) - 1.0
-        ndc_y = 1.0 - (2.0 * mouse_y / height)
-
-        # Get camera properties
-        projection = self.projectionMatrix(
-            region=self.getViewport(), viewport=self.getViewport()
-        )  # Use current viewport
-        view = self.viewMatrix()
-
-        # Create combined inverse transform
-        inv_transform = projection * view
-        inv_transform = inv_transform.inverted()[0]  # inverted returns (matrix, success)
-
-        # Create near and far points in NDC
-        near_point = QVector4D(ndc_x, ndc_y, -1.0, 1.0)  # Near plane
-        far_point = QVector4D(ndc_x, ndc_y, 1.0, 1.0)  # Far plane
-
-        # Transform to world space
-        near_world = inv_transform.map(near_point)
-        far_world = inv_transform.map(far_point)
-
-        # Perspective divide
-        if near_world.w() != 0:
-            near_world /= near_world.w()
-        if far_world.w() != 0:
-            far_world /= far_world.w()
-
-        # Create ray from camera through mouse position
-        ray_origin = Vector(near_world.x(), near_world.y(), near_world.z())
-        ray_direction = Vector(
-            far_world.x() - near_world.x(),
-            far_world.y() - near_world.y(),
-            far_world.z() - near_world.z(),
-        )
-        ray_direction.normalize()
-
-        # Calculate intersection with ground plane (z=0)
-        if abs(ray_direction.z()) < 1e-6:  # Ray is parallel to ground
-            return None
-
-        t = -ray_origin.z() / ray_direction.z()
-        if t < 0:  # Intersection is behind the camera
-            return None
-
-        # Calculate intersection point
-        intersection = Vector(
-            ray_origin.x() + ray_direction.x() * t,
-            ray_origin.y() + ray_direction.y() * t,
-            0.0,  # On the ground plane
-        )
-
-        return intersection
-
     def mouseMoveEvent(self, ev):
-        self.viewport_axes.update_rotation(
-            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-        )
-        # For top-down view only panning and zoom are enabled
+        self.viewport_axes.update_rotation(self.opts["elevation"], self.opts["azimuth"])
         if self._top_down_view_enabled:
             self._update_mouse_position_display(ev)
-            self._top_down_mouse_drag_event(ev)
         else:
             return super().mouseMoveEvent(ev)
-
-    def mousePressEvent(self, ev) -> None:
-        super().mousePressEvent(ev)
-        # Initialize for top-down dragging
-        self._last_mouse_drag_position = ev.position()
 
     def wheelEvent(self, ev):
         if self._top_down_view_enabled and ev.position() is not None:
@@ -698,25 +682,8 @@ class Map3D(GLViewWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.viewport_axes.move(10, self.height() - self.viewport_axes.height() - 10)
+        self.viewport_axes.update_position()
         self.ref_frames.update_label_position()
-
-    def update_data(self, rotation: Vector):
-        roll, pitch, yaw = (rotation.x(), rotation.y(), rotation.z())
-        transform = Transform3D()
-        transform.rotate(roll, 1, 0, 0)
-        transform.rotate(pitch, 0, 1, 0)
-        transform.rotate(yaw, 0, 0, 1)
-        self.world_origin.setTransform(transform)
-
-    def _top_down_mouse_drag_event(self, ev):
-        if ev.buttons() == Qt.LeftButton:
-            delta = ev.position().toPoint() - self._last_mouse_drag_position.toPoint()
-            self._last_mouse_drag_position = ev.position()
-            pan_speed = 0.005 * self.opts["distance"]
-            dx = pan_speed * delta.x()
-            dy = pan_speed * delta.y()
-            self.pan(dy, dx, 0)
 
     def _view_movement_callback(self):
         speed = self.view_movement.get_speed(
@@ -737,7 +704,13 @@ class Map3D(GLViewWidget):
         pos = ev.position().toPoint()
         world_x, world_y = self._top_down_screen_to_world(pos.x(), pos.y())
 
-        self.mouse_position_2d_label.update_coordinates(x=world_x, y=world_y)
+        # Correct for reference frame position
+        # TODO: this only takes into account position, not rotation
+        ref_frame_offset = self.ref_frames.get_active().get_position()
+        ref_frame_x = world_x - ref_frame_offset.x()
+        ref_frame_y = world_y - ref_frame_offset.y()
+
+        self.mouse_position_2d_label.update_coordinates(x=ref_frame_x, y=ref_frame_y)
         self.mouse_position_2d_label.update_position(x=pos.x(), y=pos.y())
 
     def _top_down_screen_to_world(self, screen_x, screen_y):
@@ -745,29 +718,25 @@ class Map3D(GLViewWidget):
         viewport_height = self.height()
         aspect_ratio = viewport_width / viewport_height
 
-        camera_center = self.opts["center"]
-        camera_distance = self.opts["distance"] + camera_center.z()
-        fov = self.opts.get("fov", 60)
+        # <-1, 1> Normalized
+        norm_screen_x = (2.0 * screen_x / viewport_width) - 1.0
+        norm_screen_y = 1.0 - (2.0 * screen_y / viewport_height)
+
+        cam_center = self.opts["center"]
+        cam_distance = self.opts["distance"] + cam_center.z()
+        cam_fov = self.opts["fov"]
 
         # Visible ground plane area
-        visible_height = 2.0 * camera_distance * np.tan(np.deg2rad(fov / 2))
-        visible_width = visible_height
-
-        # <-1, 1> Normalized
-        norm_x = (2.0 * screen_x / viewport_width) - 1.0
-        norm_y = 1.0 - (2.0 * screen_y / viewport_height)
+        ground_plane_height = 2.0 * cam_distance * np.tan(np.deg2rad(cam_fov / 2))
+        ground_plane_width = ground_plane_height
 
         # World (X, Y) are Viewport (Y, -X)
         world_x = (
-            (camera_center.x() * aspect_ratio) + (norm_y * visible_height / 2.0)
+            (cam_center.x() * aspect_ratio) + (norm_screen_y * ground_plane_height / 2.0)
         ) / aspect_ratio
-        world_y = (camera_center.y()) - (norm_x * visible_width / 2.0)
+        world_y = cam_center.y() - (norm_screen_x * ground_plane_width / 2.0)
 
-        ref_frame_offset = self.ref_frames.get_active().get_position()
-        ref_frame_x = world_x - ref_frame_offset.x()
-        ref_frame_y = world_y - ref_frame_offset.y()
-
-        return ref_frame_x, ref_frame_y
+        return world_x, world_y
 
     def _add_grids(self):
         grid_1m = GLGridItem()
