@@ -31,10 +31,10 @@ class Car3D:
         """Create a simple car model starting at origin."""
         self.parent_widget = parent_widget
 
-        self.car_rf = ReferenceFrame(parent_widget, name="Vehicle", size=0.025)
+        self.car_rf = ReferenceFrame(parent_widget, name="Vehicle")
         self._car_rf_offset = Vector(0, 0, 0)
 
-        self.camera_rf = ReferenceFrame(parent_widget, name="Camera", size=0.025)
+        self.camera_rf = ReferenceFrame(parent_widget, name="Camera")
         self._camera_rf_offset = CarProps.CAMERA_POS
 
         dimensions = Vector(

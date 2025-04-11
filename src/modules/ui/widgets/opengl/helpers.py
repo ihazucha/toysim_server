@@ -47,15 +47,19 @@ def get_camera_ground_intersection(cam_position: Vector, cam_direction: Vector):
 
 
 class ReferenceFrame:
-    def __init__(self, parent_widget: GLViewWidget, name: str, abbrev: str = None, size=0.05):
+    def __init__(self, parent_widget: GLViewWidget, name: str, abbrev: str = None, size=0.025):
         assert len(name) > 0, "Come on, you can figure out a 1-letter name"
         self.parent_widget = parent_widget
         self.name = name
         self.abbrev = abbrev if abbrev else name[0]
+        self.size = size
 
-        self._is_active = False
+        self._is_focused = False
+        self._scale_factor = 1
+
         self._default_color = MColors.WHITE
-        self._default_font = Fonts.Monospace
+        self._default_font = QFont(Fonts.Monospace)
+        self._default_font.setBold(True)
 
         self.x = GLLinePlotItem(
             pos=np.array([[0] * 3, [size, 0, 0]]), color=MColors.RED, width=3, antialias=True
@@ -69,8 +73,9 @@ class ReferenceFrame:
         self.xyz_lines = [self.x, self.y, self.z]
 
         radius = size / 8
-        self.origin = OpaqueCube(size=radius)
         self.origin_offset = Vector(*[-radius / 2] * 3)
+        self.origin = OpaqueCube(size=radius)
+        self.label_offset = Vector(-0.005, -0.005, 0.01)
         self.origin_label = GLTextItem(
             pos=self.origin_offset, color=self._default_color, font=self._default_font
         )
@@ -90,22 +95,39 @@ class ReferenceFrame:
 
         tr.translate(self.origin_offset)
         self.origin.setTransform(tr)
+        if self._is_focused:
+            tr.translate(self.label_offset)
         self.origin_label.setTransform(tr)
-
         self._update_origin_label()
 
-    def set_focus(self, active: bool):
-        self._is_active = active
-        if self._is_active:
-            font = QFont(Fonts.Monospace)
-            font.setBold(True)
+    def set_focus(self, focused: bool):
+        if self._is_focused == focused:
+            return
+        self._is_focused = focused
+
+        # Calculate new size based on active state
+        current_size = self.size * (1.5 if focused else 1.0)
+        
+        # Update axes with new size
+        for line, direction in zip(self.xyz_lines, [(1,0,0), (0,1,0), (0,0,1)]):
+            end_point = [d * current_size for d in direction]
+            line.setData(pos=np.array([[0, 0, 0], end_point]))
+        
+        if self._is_focused:
+            font = QFont(self._default_font)
             self.origin_label.setData(color=MColors.ORANGE, font=font)
+            self.scale_factor = 2
         else:
+            self.scale_factor = 1
             self.origin_label.setData(color=self._default_color, font=self._default_font)
+        
+        self.setTransform(self.get_transform())
+
+    def is_focused(self) -> bool:
+        return self._is_focused
 
     def _update_origin_label(self):
-        p = self.get_position()
-        self.origin_label.setData(text=f"{self.abbrev} ({p.x():.3f}, {p.y():.3f}, {p.z():.3f})")
+        self.origin_label.setData(text=f"{self.name}")
 
     def _add_to_parent_widget(self, widget: GLViewWidget):
         for line in self.xyz_lines:
