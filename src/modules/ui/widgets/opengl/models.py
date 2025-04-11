@@ -2,7 +2,7 @@ from pyqtgraph import Transform3D, Vector
 from pyqtgraph.opengl import GLViewWidget, GLBoxItem
 
 from modules.ui.presets import MColors, Colors
-from modules.ui.widgets.opengl.helpers import BasisVectors3D
+from modules.ui.widgets.opengl.helpers import ReferenceFrame
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from PySide6.QtGui import QColor
 
@@ -31,28 +31,28 @@ class Car3D:
         """Create a simple car model starting at origin."""
         self.parent_widget = parent_widget
 
-        self.car_origin = BasisVectors3D(parent_widget, name="Vehicle", size=0.025)
-        self.car_origin_offset = Vector(0, 0, 0)
+        self.car_rf = ReferenceFrame(parent_widget, name="Vehicle", size=0.025)
+        self._car_rf_offset = Vector(0, 0, 0)
 
-        self.camera_origin = BasisVectors3D(parent_widget, name="Camera", size=0.025)
-        self.camera_origin_offset = CarProps.CAMERA_POS
+        self.camera_rf = ReferenceFrame(parent_widget, name="Camera", size=0.025)
+        self._camera_rf_offset = CarProps.CAMERA_POS
 
         dimensions = Vector(
             CarProps.CHASSIS_LENGTH, CarProps.CHASSIS_WIDTH, CarProps.CHASSIS_HEIGHT
         )
         self.body = GLBoxItem(size=dimensions, color=Colors.ON_ACCENT)
         self.body.lineplot.setData(width=2, antialias=True)
-        self.body_offset = Vector(-0.01, -CarProps.CHASSIS_WIDTH / 2, CarProps.WHEEL_RADIUS)
+        self._body_offset = Vector(-0.01, -CarProps.CHASSIS_WIDTH / 2, CarProps.WHEEL_RADIUS)
 
         # FL, FR, RL, RR
-        self.wheel_offsets = [
+        self._wheel_offsets = [
             Vector(CarProps.WHEELBASE, CarProps.CHASSIS_WIDTH / 2 + CarProps.WHEEL_WIDTH, 0),
             Vector(CarProps.WHEELBASE, -CarProps.CHASSIS_WIDTH / 2, 0),
             Vector(0, CarProps.CHASSIS_WIDTH / 2 + CarProps.WHEEL_WIDTH, 0),
             Vector(0, -CarProps.CHASSIS_WIDTH / 2, 0),
         ]
         self.wheels = []
-        for _ in self.wheel_offsets:
+        for _ in self._wheel_offsets:
             wheel = OpaqueCylinder(
                 radius=CarProps.WHEEL_RADIUS, height=CarProps.WHEEL_WIDTH, color=QColor(Colors.ON_ACCENT),
             )
@@ -77,9 +77,9 @@ class Car3D:
         self.steering_angle_deg = steering_angle_deg
 
         for item, offset in [
-            (self.body, self.body_offset),
-            (self.car_origin, self.car_origin_offset),
-            (self.camera_origin, self.camera_origin_offset),
+            (self.body, self._body_offset),
+            (self.car_rf, self._car_rf_offset),
+            (self.camera_rf, self._camera_rf_offset),
         ]:
             t = Transform3D()
             t.translate(x, y, 0)
@@ -91,7 +91,7 @@ class Car3D:
             t_wheel = Transform3D()
             t_wheel.translate(x, y, 0)
             t_wheel.rotate(heading_deg, 0, 0, 1)
-            t_wheel.translate(self.wheel_offsets[i])
+            t_wheel.translate(self._wheel_offsets[i])
             if i < 2:
                 t_wheel.translate(Vector(0, -CarProps.WHEEL_WIDTH / 2, 0))
                 t_wheel.rotate(steering_angle_deg, 0, 0, 1)

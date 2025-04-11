@@ -1,12 +1,12 @@
 import numpy as np
 from typing import Tuple
 
+from pyqtgraph import Vector
 from pyqtgraph.opengl.MeshData import MeshData
 from pyqtgraph.opengl.items.GLMeshItem import GLMeshItem
+from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
 
 from modules.ui.presets import MColors
-
-from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
 
 customWorldLight = ShaderProgram('customWorldLight', [
     VertexShader("""
@@ -184,3 +184,9 @@ class OpaqueCylinder(GLMeshItem):
             *args,
             **kwargs
         )
+
+    def get_position(self):
+        return Vector(self.transform().matrix()[:3, 3])
+    
+    def get_transform(self):
+        return self.transform()

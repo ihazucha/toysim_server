@@ -1,12 +1,13 @@
+from enum import Enum
 import sys
 
 sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 import numpy as np
-from typing import Any, Set
+from typing import Any, Iterable, Set
 from copy import deepcopy
 
-from PySide6.QtCore import Qt, QTimer, QPointF
-from PySide6.QtGui import QPainter, QPen, QVector3D
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -18,16 +19,23 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGridLayout,
     QGroupBox,
+    QSizePolicy,
 )
 
-from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem, GLTextItem
+from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem
 from pyqtgraph import Transform3D, Vector
 
 from modules.ui.presets import Fonts, MColors
 
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from modules.ui.widgets.opengl.models import Car3D
-from modules.ui.widgets.opengl.helpers import BasisVectors3D
+from modules.ui.widgets.opengl.helpers import (
+    ReferenceFrame,
+    GLMultiTextItem,
+    get_camera_forward_vector,
+    get_camera_right_vector,
+    get_camera_ground_intersection,
+)
 
 
 class PositionLabel2D(QLabel):
@@ -70,70 +78,95 @@ class PositionLabel2D(QLabel):
         self.move(x, y)
 
 
-class Label2D(QLabel):
-    """2D floating coordinate label (e.g. for top-down view)"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setStyleSheet(
-            """
-            background-color: rgba(0, 0, 0, 120); 
-            color: white; 
-            padding: 5px;
-            border-radius: 3px;
-        """
-        )
-        self.setAlignment(Qt.AlignCenter)
-        self.setMinimumWidth(100)
-        self.show()
-
-
-class ReferenceFrameLabel(Label2D):
+class ReferenceFrameLabel(QLabel):
     """Label showing the active reference frame with enhanced styling"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        color = (
+            MColors.ORANGE.red(),
+            MColors.ORANGE.green(),
+            MColors.ORANGE.blue(),
+            MColors.ORANGE.alpha(),
+        )
         self.setStyleSheet(
-            """
+            f"""
             background-color: rgba(0, 0, 0, 180); 
-            color: white; 
+            color: rgba{color}; 
             padding: 5px;
             border-radius: 5px;
             border: 1px solid rgba(120, 120, 120, 50);
             font-weight: bold;
         """
         )
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMinimumWidth(100)
+        self.show()
 
     def set_name(self, name: str):
         self.setText(f"📐 {name}")
 
 
 class ReferenceFrames:
-    def __init__(self, parent: GLViewWidget):
+    def __init__(self, parent: GLViewWidget, ref_frames: Iterable[ReferenceFrame] = []):
         self.parent = parent
+
         self._frames_by_name = dict()
+        self._names_by_key = dict()
         self._active: str = None
+
+        self._keys = [
+            Qt.Key.Key_1,
+            Qt.Key.Key_2,
+            Qt.Key.Key_3,
+            Qt.Key.Key_4,
+            Qt.Key.Key_5,
+            Qt.Key.Key_6,
+        ]
 
         self.active_label = ReferenceFrameLabel(parent=self.parent)
         self.update_label_position()
 
-    # TODO: keep the coordinate_system as BasisVector3D for now
-    # as an upgrade - separate the ref_frame including it's transformation
-    # from the visualization
-    def add(self, ref_frame: BasisVectors3D):
-        name = ref_frame.name
-        assert self._frames_by_name.get(name) is None, f"Ref frame {name} already defined"
-        self._frames_by_name[name] = ref_frame
+        for rf in ref_frames:
+            self.add(rf)
+        if len(ref_frames):
+            self.set_active(ref_frames[0].name)
+
+    def is_rf_key(self, key: Qt.Key):
+        return key in self._keys
+
+    def set_active_rf_by_key(self, key):
+        name = self._names_by_key.get(key, None)
+        if name is not None: 
+            self.set_active(name)
+
+    def add(self, rf: ReferenceFrame):
+        assert len(self._frames_by_name) <= len(
+            self._keys
+        ), "Maximum number of reference frames reached, update the _keys list to add more"
+        assert self._frames_by_name.get(rf.name) is None, f"Ref frame {rf.name} already defined"
+
+        key_index = len(self._frames_by_name)
+        key = self._keys[key_index]
+        self._names_by_key[key] = rf.name
+        self._frames_by_name[rf.name] = rf
 
     def remove(self, name: str):
         del self._frames_by_name[name]
 
     def set_active(self, name: str):
         self._active = name
+        for frame in self._frames_by_name.values():
+            frame.set_focus(False)
+        self._frames_by_name[name].set_focus(True)
         self.active_label.set_name(name)
 
-    def get_active(self) -> BasisVectors3D:
+    def get_active(self) -> ReferenceFrame:
         return self._frames_by_name[self._active]
+
+    def get_frames(self) -> Iterable[ReferenceFrame]:
+        return self._frames_by_name.values()
 
     def update_label_position(self, x=10, y=-10):
         self.active_label.move(x, self.parent.height() - self.active_label.height() + y)
@@ -270,6 +303,58 @@ class ViewTransition:
         return start + t * (end - start)
 
 
+class ViewManager:
+    class Views(Enum):
+        DEFAULT = 0
+        TOPDOWN = 1
+
+    def __init__(self, parent_widget: GLViewWidget, view_transition: ViewTransition):
+        self.parent_widget = parent_widget
+        self.view_transition = view_transition
+        self.active_view = self.Views.DEFAULT
+
+    def is_active(self, view: Views):
+        return self.active_view == view
+
+    def toggle(self, view: Views):
+        self.active_view = self.Views.DEFAULT if self.active_view == view else view
+
+        # Cancel ongoing animation
+        if self.view_transition.is_transitioning():
+            self.view_transition.stop()
+
+        if self.is_active(self.Views.TOPDOWN):
+            self._set_topdown()
+        else:
+            self._set_default()
+
+        self.view_transition.start(dt_ms=16)
+
+    def _set_topdown(self):
+        opts = self.parent_widget.opts
+        opts["azimuth"] %= 360
+        self.view_transition.set_origin(opts)
+
+        cam_position = self.parent_widget.cameraPosition()
+        cam_direction = get_camera_forward_vector(opts["elevation"], opts["azimuth"])
+        ground_position = get_camera_ground_intersection(cam_position, cam_direction)
+        if ground_position is None:
+            target = opts["center"]
+        else:
+            target = Vector(ground_position.x(), ground_position.y(), opts["center"].z())
+        self.view_transition.set_target(opts, elevation=90, azimuth=180, center=target)
+
+        self.parent_widget.setMouseTracking(True)
+        self.parent_widget.setCursor(Qt.CursorShape.CrossCursor)
+
+    def _set_default(self):
+        self.view_transition.set_target(self.view_transition.origin_opts)
+        self.view_transition.set_origin(self.parent_widget.opts)
+
+        self.parent_widget.setMouseTracking(False)
+        self.parent_widget.setCursor(Qt.CursorShape.ArrowCursor)
+
+
 class ViewMovement:
     MOVE_SPEED = 0.02
     SPRINT_MULTIPLIER = 3.0
@@ -311,12 +396,12 @@ class ViewMovement:
             speed_factor /= self.SPRINT_MULTIPLIER
 
         # Directions
-        forward = self.get_camera_forward_vector(elevation, azimuth)
+        forward = get_camera_forward_vector(elevation, azimuth)
         if topdown_view:
             # Make W/S pan up/down
             forward.setX(-forward.z())
             forward.setZ(0)
-        right = self.get_camera_right_vector(azimuth)
+        right = get_camera_right_vector(azimuth)
         up = Vector(0, 0, 1)
 
         speed = Vector(0, 0, 0)
@@ -342,21 +427,6 @@ class ViewMovement:
 
         return Vector(0, 0, 0)
 
-    def get_camera_forward_vector(self, elevation, azimuth):
-        elevation_rad = np.radians(elevation)
-        azimuth_rad = np.radians(azimuth)
-        x = -np.cos(azimuth_rad) * np.cos(elevation_rad)
-        y = -np.sin(azimuth_rad) * np.cos(elevation_rad)
-        z = -np.sin(elevation_rad)
-        return Vector(x, y, z)
-
-    def get_camera_right_vector(self, azimuth):
-        azimuth_rad = np.radians(azimuth)
-        x = -np.sin(azimuth_rad)
-        y = np.cos(azimuth_rad)
-        z = 0
-        return Vector(x, y, z)
-
 
 class NavigationData:
     def __init__(self, parent_widget: GLViewWidget):
@@ -381,7 +451,7 @@ class NavigationData:
                 drawFaces=True,
             )
             mesh.setDepthValue(-1)
-            mesh.translate(dx=rm[0], dy=rm[1], dz=-0.001)
+            mesh.translate(dx=rm[0], dy=rm[1], dz=0.000)
             self.parent_widget.addItem(mesh)
             self.roadmarks.append(mesh)
         roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
@@ -414,126 +484,71 @@ class NavigationDataPlayer:
 
     def play_next_frame(self):
         rm_data = self.data[self.idx].roadmarks_data
-        self.update_data_callback(rm_data.roadmarks, rm_data.path)
+        # self.update_data_callback(rm_data.roadmarks, rm_data.path)
+        self.update_data_callback(np.array([[1, 0]]), np.array([]))
         self.idx = (self.idx + 1) % len(self.data)
-
-
-class MutiColorGLTextItem(GLTextItem):
-    def __init__(self, parentItem=None, colors: list = [], texts: list = [], **kwds):
-        super().__init__(parentItem, **kwds)
-        self.colors = colors if len(colors) else self.color
-        self.texts = texts
-
-    def setData(self, colors: list = [], texts: list = [], **kwds):
-        assert (
-            len(colors) <= 1 or len(colors) == len(texts)
-        ), "Number of colors has to match texts or be <= 1"
-        
-        if len(colors):
-            self.colors = colors
-        self.texts = texts
-        super().setData(**kwds)
-        self.update()
-
-    def paint(self):
-        if len(self.texts) < 1:
-            return
-        self.setupGLState()
-
-        project = self.compute_projection()
-        vec3 = QVector3D(*self.pos)
-        text_pos = project.map(vec3).toPointF()
-
-        painter = QPainter(self.view())
-        painter.setFont(self.font)
-        painter.setRenderHints(
-            QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
-        )
-
-        x_offsets = [0]
-        for i in range(1, len(self.texts)):
-            x_offsets.append(x_offsets[i - 1] + len(self.texts[i - 1]))
-
-        for i, text in enumerate(self.texts):
-            color = self.colors[i] if len(self.colors) > 1 else self.colors[0]
-            painter.setPen(color)
-            painter.drawText(text_pos + QPointF(0, -i * 14), text)
-        
-        painter.end()
 
 
 class PositionTracker:
     def __init__(self, parent: GLViewWidget):
         self.parent = parent
-        self.items = set()
+        self.items_visual_clues = set()
 
     def add_item(self, item):
-        self.items.add(item)
+        self.items_visual_clues.add(item)
+        self.parent.addItem(item)
 
     def remove_item(self, item):
-        self.items.remove(item)
+        self.parent.removeItem(item)
+        self.items_visual_clues.remove(item)
 
     def clear_items(self):
-        for item in self.items:
+        for item in self.items_visual_clues:
             self.parent.removeItem(item)
-        self.items.clear()
+        self.items_visual_clues.clear()
 
-    def update(self, items, view_opts: dict, origin_position: Vector):
+    def update_rf(self, transform: Vector):
+        self._rf_transform = transform
+        self._rf_position = Vector(transform.matrix()[:3, 3])
+
+    def update_items(self, items):
+        """Clears items and adds new"""
         self.clear_items()
-
-        elevation = view_opts["elevation"]
-        azimuth = view_opts["azimuth"]
-        center = view_opts["center"]
-
-        azim_rad = np.radians(azimuth)
-        elev_rad = np.radians(elevation)
-        azim_sin, azim_cos = np.sin(azim_rad), np.cos(azim_rad)
-        elev_sin, elev_cos = np.sin(elev_rad), np.cos(elev_rad)
-        abs_azim_sin, abs_azim_cos = abs(azim_sin), abs(azim_cos)
-        abs_elev_sin = abs(elev_sin)
-
         for item in items:
-            position = Vector(item.transform().matrix()[:3, 3])
-            camera_distance = center.distanceToPoint(position)
-            origin_distance = position.distanceToPoint(origin_position)
+            p_world = item.get_position()
+            p_active_rf = self._rf_transform.map(p_world)
+            origin_distance = p_world.distanceToPoint(self._rf_position)
+            self._add_item_distance_line(self._rf_position, p_world)
+            self._add_item_label(p_world, p_active_rf, origin_distance)
 
-            # Distance line
-            line = GLLinePlotItem(color=MColors.PURPLISH_LIGHT.getRgbF(), antialias=True)
-            line.setData(pos=(origin_position, position))
-            self.add_item(line)
-            self.parent.addItem(line)
+    def update(self, rf_transform: Vector, items):
+        self.update_rf(rf_transform)
+        self.update_items(items)
 
-            # Position label
-            pos_text_pos = Vector(position + Vector(0, 0, 0.05))
-            # pos_text = GLTextItem(pos=pos_text_pos, font=Fonts.Monospace, color=MColors.TURQUOIS)
-            # pos_text.setData(text=f"({position.x():.3f}, {position.y():.3f}, {position.z():.3f})")
-            # self.add_item(pos_text)
-            # self.parent.addItem(pos_text)
+    def _add_item_distance_line(self, start: Vector, end: Vector):
+        line = GLLinePlotItem(color=MColors.PURPLISH_LIGHT.getRgbF(), antialias=True)
+        line.setData(pos=(start, end))
+        self.add_item(line)
 
+    def _add_item_label(
+        self, pos_world: Vector, pos_rf: Vector, dist_rf: float
+    ):
+        pos_text_pos = Vector(pos_world + Vector(0, 0, 0.05))
+        multi_label = GLMultiTextItem(pos=pos_text_pos, font=Fonts.Monospace)
+        multi_label.setData(
+            colors=[MColors.TURQUOIS, MColors.PURPLISH_LIGHT],
+            texts=[
+                f"({pos_rf.x():.3f}, {pos_rf.y():.3f}, {pos_rf.z():.3f})",
+                f" {dist_rf:.3f}",
+            ],
+        )
+        self.add_item(multi_label)
 
-            # # Distance label
-            # dist_text_offset = Vector(
-            #     0.03 * abs_elev_sin * (1 + abs_azim_sin) * camera_distance * -azim_cos,
-            #     -0.03 * azim_sin * (1 + abs_azim_cos) * abs_elev_sin * camera_distance,
-            #     0.025 * elev_cos * camera_distance,
-            # )
-            # dist_text_pos = Vector(pos_text_pos - dist_text_offset)
-            # text_dist = GLTextItem(
-            #     pos=dist_text_pos, font=Fonts.Monospace, color=MColors.PURPLISH_LIGHT
-            # )
-            # text_dist.setData(text=f" {origin_distance:.3f}")
-            # self.add_item(text_dist)
-            # self.parent.addItem(text_dist)
-
-            multi_label = MutiColorGLTextItem(pos=pos_text_pos, colors=[MColors.TURQUOIS, MColors.PURPLISH_LIGHT], font=Fonts.Monospace)
-            multi_label.setData(texts=[f"({position.x():.3f}, {position.y():.3f}, {position.z():.3f})", f" {origin_distance:.3f}"])
-            self.add_item(multi_label)
-            self.parent.addItem(multi_label)
 
 class Map3D(GLViewWidget):
     INIT_OPTS = {
         "center": Vector(-1.60, 1.5, 1.8),
-        "distance": 0.1,
+        "distance": 0.35,
         "elevation": 35,
         "azimuth": 145,
     }
@@ -554,90 +569,56 @@ class Map3D(GLViewWidget):
 
         # Items
         self._add_grids()
-        self.world_origin = BasisVectors3D(parent_widget=self, name="World")
+        self.world_rf = ReferenceFrame(parent_widget=self, name="World")
         self.viewport_axes = ViewportAxes(self)
         self.car = Car3D(parent_widget=self)
         self.mouse_position_2d_label = PositionLabel2D(parent=self)
         self.navigation_data = NavigationData(parent_widget=self)
         self.navigation_data_player = NavigationDataPlayer(self.update_navigation_data)
 
-        self.ref_frames = ReferenceFrames(parent=self)
-        self.ref_frames.add(self.world_origin)
-        self.ref_frames.add(self.car.car_origin)
-        self.ref_frames.add(self.car.camera_origin)
-        self.ref_frames.set_active(self.world_origin.name)
-
-        self._on_camera_change_group: Set[Any] = {self.viewport_axes}
+        ref_frames = [self.world_rf, self.car.car_rf, self.car.camera_rf]
+        self.rfs = ReferenceFrames(parent=self, ref_frames=ref_frames)
 
         # Item position tracking
-        self.position_tracker = PositionTracker(parent=self)
+        self.path_planner_position_tracker = PositionTracker(parent=self)
+        self.rf_position_tracker = PositionTracker(parent=self)
+        self.rf_position_tracker.update_rf(self.rfs.get_active().get_transform())
+        self.rf_position_tracker.update_items(items=ref_frames)
 
         # Views
         self.view_transition = ViewTransition(animation_callback=self._animation_callback)
-        self._top_down_view_enabled = False
+        self.view_manager = ViewManager(parent_widget=self, view_transition=self.view_transition)
 
         # Movement
         self.view_movement = ViewMovement(apply_movement_callback=self._view_movement_callback)
 
+        # Events
+        self._on_camera_change_group: Set[Any] = {self.viewport_axes}
         self._update_on_camera_change()
 
     def update_navigation_data(self, *args, **kwargs):
         items = self.navigation_data.update(*args, **kwargs)
-        origin_position = self.ref_frames.get_active().get_position()
-        self.position_tracker.update(items, self.opts, origin_position)
+        origin_transform = self.rfs.get_active().get_transform()
+        self.path_planner_position_tracker.update(rf_transform=origin_transform, items=items)
+
+    def update_car_data(self, x, y, heading, steering_angle):
+        self.car.update(x, y, heading, steering_angle)
+        self.rf_position_tracker.update_items(items=self.rfs.get_frames())
 
     def toggle_top_down_view(self):
         """Toggle between top-down view and normal 3D view with animation."""
-        self._top_down_view_enabled = not self._top_down_view_enabled
-
-        # Cancel ongoing animation
-        if self.view_transition.is_transitioning():
-            self.view_transition.stop()
-
-        if self._top_down_view_enabled:
-            # Prevent redundant rotations (azimuth increments past 360)
-            self.opts["azimuth"] %= 360
-            self.view_transition.set_origin(self.opts)
-            target = self.get_camera_ground_intersection()
-            target.setZ(self.opts["center"].z())
-            self.view_transition.set_target(self.opts, elevation=90, azimuth=180, center=target)
-            self.setMouseTracking(True)
-            self.setCursor(Qt.CursorShape.CrossCursor)
-        else:
-            self.view_transition.set_target(self.view_transition.origin_opts)
-            self.view_transition.set_origin(self.opts)
-            self.setMouseTracking(False)
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-
-        self.mouse_position_2d_label.toggle(self._top_down_view_enabled)
-
-        self.view_transition.start(dt_ms=16)
-
-    def get_camera_ground_intersection(self):
-        direction = self.view_movement.get_camera_forward_vector(
-            elevation=self.opts["elevation"], azimuth=self.opts["azimuth"]
-        )
-        cam_pos = self.cameraPosition()
-        # If there's ground to be seen (dir_z < 0)
-        if direction.z() < 0:
-            distance = -cam_pos.z() / direction.z()
-            intersection_x = cam_pos.x() + distance * direction.x()
-            intersection_y = cam_pos.y() + distance * direction.y()
-            target_center = Vector(intersection_x, intersection_y, 0)
-        else:
-            target_center = self.opts["center"]
-
-        return target_center
+        self.view_manager.toggle(ViewManager.Views.TOPDOWN)
+        self.mouse_position_2d_label.toggle(self.view_manager.is_active(ViewManager.Views.TOPDOWN))
 
     def mouseMoveEvent(self, ev):
         self.viewport_axes.update_rotation(self.opts["elevation"], self.opts["azimuth"])
-        if self._top_down_view_enabled:
+        if self.view_manager.is_active(ViewManager.Views.TOPDOWN):
             self._update_mouse_position_display(ev)
         else:
             return super().mouseMoveEvent(ev)
 
     def wheelEvent(self, ev):
-        if self._top_down_view_enabled and ev.position() is not None:
+        if self.view_manager.is_active(ViewManager.Views.TOPDOWN) and ev.position() is not None:
             self._update_mouse_position_display(ev)
 
         self._update_on_camera_change()
@@ -660,17 +641,17 @@ class Map3D(GLViewWidget):
         key = event.key()
         if self.view_movement.is_movement_key(key):
             self.view_movement.set_pressed_key(key)
+        elif self.rfs.is_rf_key(key):
+            self.rfs.set_active_rf_by_key(key)
+            self._on_ref_frame_change()
         elif key == Qt.Key.Key_T:
             self.toggle_top_down_view()
-        elif key == Qt.Key.Key_1:
-            self.ref_frames.set_active("World")
-        elif key == Qt.Key.Key_2:
-            self.ref_frames.set_active("Vehicle")
-        elif key == Qt.Key.Key_3:
-            self.ref_frames.set_active("Camera")
         else:
             return False
         return True
+
+    def _on_ref_frame_change(self):
+        self.rf_position_tracker.update_rf(self.rfs.get_active().get_transform())
 
     def keyReleaseEvent(self, event):
         key = event.key()
@@ -683,11 +664,13 @@ class Map3D(GLViewWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.viewport_axes.update_position()
-        self.ref_frames.update_label_position()
+        self.rfs.update_label_position()
 
     def _view_movement_callback(self):
         speed = self.view_movement.get_speed(
-            self.opts["elevation"], self.opts["azimuth"], self._top_down_view_enabled
+            self.opts["elevation"],
+            self.opts["azimuth"],
+            self.view_manager.is_active(ViewManager.Views.TOPDOWN),
         )
         self.setCameraPosition(pos=self.opts["center"] + speed)
         self._update_on_camera_change()
@@ -706,7 +689,7 @@ class Map3D(GLViewWidget):
 
         # Correct for reference frame position
         # TODO: this only takes into account position, not rotation
-        ref_frame_offset = self.ref_frames.get_active().get_position()
+        ref_frame_offset = self.rfs.get_active().get_position()
         ref_frame_x = world_x - ref_frame_offset.x()
         ref_frame_y = world_y - ref_frame_offset.y()
 
@@ -931,7 +914,7 @@ class Map3DDemo(QMainWindow):
         y = self.control_panel.car_y_slider.value() / 10.0
         heading = self.control_panel.car_heading_slider.value()
         steering_angle = self.control_panel.car_steering_angle_slider.value()
-        self.map_3d.car.update(x, y, heading, steering_angle)
+        self.map_3d.update_car_data(x, y, heading, steering_angle)
 
     def _toggle_animation(self, checked):
         """Toggle animation on/off."""

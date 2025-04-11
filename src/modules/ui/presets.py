@@ -23,6 +23,7 @@ class MColors:
     PURPLISH = QColor(93, 23, 155, 255)
     PURPLISH_LIGHT = QColor(136, 97, 170, 255)
     TURQUOIS = QColor(23, 155, 93, 255)
+    ORANGE = QColor(255, 165, 0, 255)
 
 class Colors:
     PRIMARY = "#202020"
