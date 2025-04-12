@@ -13,15 +13,14 @@ from PySide6.QtWidgets import (
 )
 
 from modules.ui.plots import (
-    Colors,
     EncoderPlotWidget,
-    IMUPlotWidget,
     MapPlotWidget,
     SteeringPlotWidget,
     LongitudinalControlWidget,
+    LatencyPlotWidget,
 )
-
-from modules.ui.plots import LatencyPlotWidget
+from modules.ui.presets import Colors
+from modules.ui.widgets.map_3d import Map3D
 
 from modules.messaging import messaging
 from utils.paths import icon_path
@@ -31,7 +30,7 @@ from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
-from modules.ui.presets import DefaultMonospaceFont, FitGraphicsView
+from modules.ui.presets import Fonts, FitGraphicsView
 from modules.ui.settings import WindowSettings
 
 from collections import deque
@@ -50,6 +49,13 @@ def toggle_widget(w: QWidget):
 # -------------------------------------------------------------------------------------------------
 
 
+from collections import deque
+import time
+import cProfile  # Add cProfile
+import pstats  # Add pstats
+import io  # Add io
+
+
 class RendererMainWindow(QMainWindow):
     init_complete = Signal()
 
@@ -59,9 +65,13 @@ class RendererMainWindow(QMainWindow):
         self.settings = WindowSettings(self)
         self.settings.load()
 
-        # FPS tracking
-        self.last_update_time = time.time()
-        self.fps_samples = deque([0] * 10, maxlen=10)  # Track last 10 frames
+        # --- FPS Tracking ---
+        self._last_paint_time = None
+        self._gui_fps_samples = deque([0] * 10, maxlen=10)
+
+        self._last_update_time = None
+        self._update_fps_samples = deque([0] * 10, maxlen=20) # Average over 10 paints
+        # ---
 
     def closeEvent(self, event):
         self.settings.save()
@@ -125,11 +135,11 @@ class RendererMainWindow(QMainWindow):
         self.speed_plot = LongitudinalControlWidget()
         self.steering_plot = SteeringPlotWidget()
         self.map_plot = MapPlotWidget()
-        self.imu_plot = IMUPlotWidget()
+        self.map3d_plot = Map3D()
 
         imu_layout = QVBoxLayout()
         imu_layout.addWidget(self.map_plot, stretch=1)
-        imu_layout.addWidget(self.imu_plot, stretch=1)
+        imu_layout.addWidget(self.map3d_plot, stretch=1)
 
         left_layout = QHBoxLayout()
         left_layout.addLayout(imu_layout)
@@ -197,9 +207,29 @@ class RendererMainWindow(QMainWindow):
         )
         status_bar.setSizeGripEnabled(False)
 
-        self.fps_label = QLabel("Camera FPS: --")
+        self.fps_label = QLabel("Data FPS: --") # Rename old label
         self.fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
         status_bar.addPermanentWidget(self.fps_label)
+
+        # Add new label for GUI FPS
+        self.gui_fps_label = QLabel("GUI FPS: --")
+        self.gui_fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
+        status_bar.addPermanentWidget(self.gui_fps_label)
+
+    def paintEvent(self, event):
+        """Override paintEvent to measure GUI frame time."""
+        # --- GUI FPS Measurement ---
+        current_paint_time = time.perf_counter()
+        if self._last_paint_time is not None:
+            dt = current_paint_time - self._last_paint_time
+            if dt > 1e-9:
+                fps = 1.0 / dt
+                self._gui_fps_samples.append(fps)
+                avg_fps = sum(self._gui_fps_samples) / len(self._gui_fps_samples)
+                self.gui_fps_label.setText(f"GUI FPS: {avg_fps:.1f}")
+        self._last_paint_time = current_paint_time
+        # ---
+        super().paintEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F11:
@@ -219,16 +249,17 @@ class RendererMainWindow(QMainWindow):
         self.processor_dt_plot.update(dt_ms=dt_ms)
 
     def update_real_data(self, data: QRealData):
-        # Calculate FPS
+        # --- Data Update Rate ---
         current_time = time.time()
-        dt = current_time - self.last_update_time
-        self.last_update_time = current_time
-
-        if dt > 0:
-            fps = 1.0 / dt
-            self.fps_samples.append(fps)
-            avg_fps = sum(self.fps_samples) / len(self.fps_samples)
-            self.fps_label.setText(f"Camera FPS: {avg_fps:.1f}")
+        if self._last_update_time is not None:
+            dt = current_time - self._last_update_time
+            if dt > 0:
+                fps = 1.0 / dt
+                self._update_fps_samples.append(fps)
+                avg_fps = sum(self._update_fps_samples) / len(self._update_fps_samples)
+                self.fps_label.setText(f"Data FPS: {avg_fps:.1f}")
+        self._last_update_time = current_time
+        #  ---
 
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
@@ -236,19 +267,27 @@ class RendererMainWindow(QMainWindow):
         rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
         self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
 
-        self.speed_plot.update(
-            measured_speed=data.raw.sensor_fusion.avg_speed,
-            target_speed=data.raw.control.speed,
-            engine_power=data.raw.actuators.motor_power,
+        self.map3d_plot.update_data(
+            car_x=0,
+            car_y=0,
+            car_heading=0,
+            car_steering_angle=data.raw.original.control.steering_angle,
+            roadmarks=data.raw.roadmarks_data.roadmarks,
+            path=data.raw.roadmarks_data.path,
         )
-        encoder_data_samples = [x.encoder_data for x in data.raw.sensor_fusion.speedometer]
+        self.speed_plot.update(
+            measured_speed=data.raw.original.sensor_fusion.avg_speed,
+            target_speed=data.raw.original.control.speed,
+            engine_power=data.raw.original.actuators.motor_power,
+        )
+        encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
         self.left_encoder_plot.update(encoder_data_samples)
 
 
 class Renderer:
     def run(self, return_window=False):
         app = QApplication.instance() or QApplication(sys.argv)
-        app.setFont(DefaultMonospaceFont())
+        app.setFont(Fonts.GUIMonospace)
         window = RendererMainWindow()
 
         t_sim_data = SimDataThread()
@@ -265,30 +304,25 @@ class Renderer:
         t_playback = PlaybackThread(data_queue=messaging)
         window.init_complete.connect(t_playback.start)
 
-        threads = [
-            t_sim_data,
-            t_vehicle_data,
-            t_recorder,
-            t_playback
-        ]
+        threads = [t_sim_data, t_vehicle_data, t_recorder, t_playback]
 
         def stop_threads():
             print("Shutting down threads gracefully...")
-                    
+
             for t in threads:
-                if hasattr(t, 'requestInterruption'):
+                if hasattr(t, "requestInterruption"):
                     t.requestInterruption()
-            
+
             # Give threads time to process the interruption request
             QApplication.processEvents()
-            
+
             for t in threads:
-                if hasattr(t, 'stop'):
+                if hasattr(t, "stop"):
                     try:
                         t.stop()
                     except Exception as e:
                         print(f"Error stopping thread {t}: {e}")
-            
+
             # Wait with timeout
             for t in threads:
                 if not t.wait(1000):  # 1 second timeout
@@ -297,12 +331,15 @@ class Renderer:
                     t.wait()
 
         app.aboutToQuit.connect(stop_threads)
-        
+
         window.init()
         window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
         window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
         window.records_sidebar.record_selected.connect(t_playback.set_current_record)
         window.records_sidebar.record_selected.connect(window.top_tool_bar.handle_record_selected)
+
+        window.records_sidebar.record_selected.emit("1743006114457116600")
+        window.top_tool_bar.playback_toggled.emit(True)
 
         self.app = app
         self.window = window

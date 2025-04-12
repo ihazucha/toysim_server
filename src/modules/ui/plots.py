@@ -3,18 +3,17 @@ import numpy as np
 from collections import deque
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D, QFont
+from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame, QVBoxLayout
 
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen, mkBrush
 import pyqtgraph as pg
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
-from datalink.data import EncoderData, Rotation
-from modules.ui.presets import DefaultMonospaceFont
+from datalink.data import Rotation
 
-FPS = 60
-DATA_QUEUE_LENGTH_SECONDS = 5
+FPS = 30
+DATA_QUEUE_LENGTH_SECONDS = 3
 DATA_QUEUE_SIZE = FPS * DATA_QUEUE_LENGTH_SECONDS
 
 PLOT_QUEUE_DEFAULT_DATA = list([0 for _ in range(DATA_QUEUE_SIZE)])
@@ -426,7 +425,7 @@ class SpeedPlotWidget(PlotWidget):
         self.plt_current_speed.setData([PLOT_TIME_STEPS[-1]], [measured_speed])
         self.plt_current_engine_power.setData([PLOT_TIME_STEPS[-1]], [engine_power_percent])
 
-        self._update_y_scales()
+        # self._update_y_scales()
 
     def _update_y_scales(self):
         # Speed
@@ -449,19 +448,6 @@ class SpeedPlotWidget(PlotWidget):
 
         if speed_too_small or speed_too_big:
             self.setYRange(speed_range_min, speed_range_max, padding=0)
-
-        # power_range_min = min(self.dq_engine_power)
-        # power_range_max = max(self.dq_engine_power)
-
-        # # Get current power view range
-        # current_power_min, current_power_max = self.power_viewbox.viewRange()[1]
-
-        # # Check if adjustment needed
-        # power_too_small = power_range_max > current_power_max * 0.75
-        # power_too_big = current_power_max > power_range_max * 1.5
-
-        # if power_too_small or power_too_big:
-        #     self.power_viewbox.setYRange(power_range_min, power_range_max, padding=0)
 
 
 class SteeringPlotWidget(PlotWidget):

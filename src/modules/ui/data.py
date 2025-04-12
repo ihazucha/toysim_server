@@ -21,7 +21,7 @@ class QSimData:
         self.processor_dt_ns: float = 0
 
 class QRealData:
-    def __init__(self, raw: RealData):
+    def __init__(self, raw: ProcessedRealData):
         self.raw = raw
         self.rgb_qimage: QImage = None
         self.rgb_updated_qimage: QImage = None
@@ -87,16 +87,13 @@ class VehicleDataThread(QThread):
             processed_real_data: ProcessedRealData = q.get(100)
             if processed_real_data is None:
                 continue
-            real_data = processed_real_data.original
-            jpg_image_data: JPGImageData = real_data.sensor_fusion.camera
+            jpg_image_data: JPGImageData = processed_real_data.original.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
             image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
-            qimage = npimage2qimage(image_array)
-            updated_qimage = npimage2qimage(processed_real_data.debug_image)
-            # TODO: replace with processed data if neccesary
-            qvehicle_data = QRealData(real_data)
-            qvehicle_data.rgb_qimage = qimage
-            qvehicle_data.rgb_updated_qimage = updated_qimage
+            
+            qvehicle_data = QRealData(processed_real_data)
+            qvehicle_data.rgb_qimage = npimage2qimage(image_array)
+            qvehicle_data.rgb_updated_qimage = npimage2qimage(processed_real_data.debug_image)
             self.data_ready.emit(qvehicle_data)
 
     def stop(self):

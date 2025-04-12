@@ -58,7 +58,7 @@ class ReferenceFrame:
         self._scale_factor = 1
 
         self._default_color = MColors.WHITE
-        self._default_font = QFont(Fonts.Monospace)
+        self._default_font = QFont(Fonts.OpenGLMonospace)
         self._default_font.setBold(True)
 
         self.x = GLLinePlotItem(

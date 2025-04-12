@@ -102,7 +102,7 @@ class ReferenceFrameLabel(QLabel):
             font-weight: bold;
         """
         )
-        self.setFont(Fonts.Monospace)
+        self.setFont(Fonts.OpenGLMonospace)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.show()
 
@@ -442,44 +442,6 @@ class ViewMovement:
         return Vector(0, 0, 0)
 
 
-class NavigationData:
-    def __init__(self, parent_widget: GLViewWidget):
-        self.parent_widget = parent_widget
-        self.roadmarks = []
-
-        self.roadmarks_scatter = GLScatterPlotItem(size=10, color=MColors.TURQUOIS.getRgbF())
-        self.roadmarks_scatter.setDepthValue(1)
-        self.parent_widget.addItem(self.roadmarks_scatter)
-
-        self.path = GLLinePlotItem(color=MColors.TURQUOIS.getRgbF(), width=3, antialias=True)
-        self.parent_widget.addItem(self.path)
-
-    def update(self, roadmarks: np.ndarray, path: np.ndarray):
-        self._clear()
-        for rm in roadmarks:
-            mesh = OpaqueCylinder(
-                radius=0.02,
-                height=0.001,
-                color=MColors.GRAY_TRANS.getRgbF(),
-                drawEdges=False,
-                drawFaces=True,
-            )
-            mesh.setDepthValue(-1)
-            mesh.translate(dx=rm[0], dy=rm[1], dz=0.000)
-            self.parent_widget.addItem(mesh)
-            self.roadmarks.append(mesh)
-        roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
-        self.roadmarks_scatter.setData(pos=roadmarks3d)
-        path3d = np.column_stack((path, np.zeros(path.shape[0])))
-        self.path.setData(pos=path3d)
-        return self.roadmarks
-
-    def _clear(self):
-        for rm in self.roadmarks:
-            self.parent_widget.removeItem(rm)
-        self.roadmarks = []
-
-
 class NavigationDataPlayer:
     def __init__(self, update_data_callback: callable):
         self.update_data_callback = update_data_callback
@@ -502,70 +464,128 @@ class NavigationDataPlayer:
         self.update_data_callback(np.array([[1, 0]]), np.array([]))
         self.idx = (self.idx + 1) % len(self.data)
 
+class Roadmark:
+    def __init__(self, position):
+        self.position = position
+    
+    def get_position(self):
+        return self.position
+
+class NavigationData:
+    def __init__(self, parent_widget: GLViewWidget):
+        self.parent_widget = parent_widget
+        self.roadmarks = []
+
+        self.roadmarks_scatter = GLScatterPlotItem(size=10, color=MColors.TURQUOIS.getRgbF())
+        self.roadmarks_scatter.setDepthValue(1)
+        self.parent_widget.addItem(self.roadmarks_scatter)
+
+        self.path = GLLinePlotItem(color=MColors.TURQUOIS.getRgbF(), width=3, antialias=True)
+        self.parent_widget.addItem(self.path)
+
+    def update(self, roadmarks: np.ndarray, path: np.ndarray):
+        # self._clear()
+        # for rm in roadmarks:
+            # mesh = OpaqueCylinder(
+            #     radius=0.02,
+            #     height=0.001,
+            #     color=MColors.GRAY_TRANS.getRgbF(),
+            #     drawEdges=False,
+            #     drawFaces=True,
+            # )
+            # mesh.setDepthValue(-1)
+            # mesh.translate(dx=rm[0], dy=rm[1], dz=0.000)
+            # self.parent_widget.addItem(mesh)
+            # self.roadmarks.append(mesh)
+        roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
+        self.roadmarks_scatter.setData(pos=roadmarks3d)
+        path3d = np.column_stack((path, np.zeros(path.shape[0])))
+        self.path.setData(pos=path3d)
+        self.roadmarks = [Roadmark(Vector(x)) for x in roadmarks3d]
+        return self.roadmarks
+
+    def _clear(self):
+        for rm in self.roadmarks:
+            self.parent_widget.removeItem(rm)
+        self.roadmarks = []
+        
 
 class PositionTracker:
     def __init__(self, parent: GLViewWidget):
         self.parent = parent
+
         self._items = []
-        self.items_visual_clues = set()
-        
+        self._cache = []
+
+        self._rf = None
+        self._rf_position = None
+        self._T_world2rf = None
+
         self.distance_color = MColors.PURPLISH_LIGHT
         self.position_color = MColors.TURQUOIS
 
-    def add_item(self, item):
-        self.items_visual_clues.add(item)
-        self.parent.addItem(item)
-
-    def remove_item(self, item):
-        self.parent.removeItem(item)
-        self.items_visual_clues.remove(item)
-
-    def clear_items(self):
-        for item in self.items_visual_clues:
-            self.parent.removeItem(item)
-        self.items_visual_clues.clear()
-
-    def set_active_rf(self, rf: ReferenceFrame):
-        self._active_rf = rf
-        self.refresh_items()
-
-    def refresh_items(self):
-        if not len(self._items):
-            return
-        self.clear_items()
-        rf_transform, b = self._active_rf.get_transform().inverted()
-        assert b, f"Failed to invert {self._active_rf.get_transform()}"
-        rf_position = self._active_rf.get_position()
-        for item in self._items:
-            p_world = item.get_position()
-            p_active_rf = rf_transform.map(p_world)
-            origin_distance = p_world.distanceToPoint(rf_position)
-            self._add_item_distance_line(rf_position, p_world)
-            self._add_item_label(p_world, p_active_rf, origin_distance)
+    def update_rf(self, rf: ReferenceFrame):
+        self._rf = rf
+        self._rf_position = self._rf.get_position()   
+        self._T_world2rf, b = self._rf.get_transform().inverted()
+        assert b, f"Failed to invert {self._rf.get_transform()}"
 
     def update_items(self, items):
-        """Clears items and adds new"""
         self._items = items
-        self.refresh_items()
+        self.update_tracking()
 
-    def _add_item_distance_line(self, start: Vector, end: Vector):
+    def update_tracking(self):
+        cache_index = 0
+        for item in self._items:
+            self._create_if_not_cached(cache_index)
+            item_pos_world = item.get_position()
+            self._update_cached_item_data(cache_index, self._rf_position, item_pos_world)
+            cache_index += 1
+        self._hide_unused_cached_items(cache_index)
+
+    def _create_if_not_cached(self, cache_index: int):
+        if cache_index == len(self._cache):
+            line = self._create_item_distance_line()
+            position = self._create_item_label()
+            self._cache.append((line, position))
+
+    def _update_cached_item_data(self, cache_index: int, rf_pos_world: Vector, item_pos_world: Vector):
+        line, position = self._cache[cache_index]
+        self._update_item_distance_line(line, rf_pos_world, item_pos_world)
+        self._update_item_label(position, rf_pos_world, item_pos_world)
+
+    def _hide_unused_cached_items(self, cache_index: int):
+        for i in range(cache_index, len(self._cache)):
+            for item in self._cache[i]:
+                item.hide()
+
+    def _create_item_distance_line(self) -> GLLinePlotItem:
         line = GLLinePlotItem(color=self.distance_color.getRgbF(), antialias=True)
-        line.setData(pos=(start, end))
-        self.add_item(line)
+        self.parent.addItem(line)
+        return line
 
-    def _add_item_label(self, pos_world: Vector, pos_rf: Vector, dist_rf: float):
-        if np.isclose(dist_rf, 0):
-            return
-        pos_text_pos = Vector(pos_world + Vector(0, 0, 0.05))
-        multi_label = GLMultiTextItem(pos=pos_text_pos, font=Fonts.Monospace)
-        multi_label.setData(
+    def _update_item_distance_line(self, line: GLLinePlotItem, start: Vector, end: Vector):
+        line.setData(pos=(start, end))
+        line.show()
+
+    def _create_item_label(self) -> GLMultiTextItem:
+        label = GLMultiTextItem(font=Fonts.OpenGLMonospace)
+        self.parent.addItem(label)
+        return label
+
+    def _update_item_label(self, label: GLMultiTextItem, pos_rf_world: Vector, pos_item_world: Vector):
+        dist_rf = pos_item_world.distanceToPoint(pos_rf_world)
+        pos_rf = self._T_world2rf.map(pos_item_world)
+        pos_text_pos = Vector(pos_item_world + Vector(0, 0, 0.05))
+        label.setData(
+            pos=pos_text_pos,
             colors=[self.position_color, self.distance_color],
             texts=[
                 f"({pos_rf.x():.3f}, {pos_rf.y():.3f}, {pos_rf.z():.3f})",
                 f" {dist_rf:.3f}",
             ],
         )
-        self.add_item(multi_label)
+        label.show()
 
 
 class Map3D(GLViewWidget):
@@ -597,17 +617,17 @@ class Map3D(GLViewWidget):
         self.car = Car3D(parent_widget=self)
         self.mouse_position_2d_label = PositionLabel2D(parent=self)
         self.navigation_data = NavigationData(parent_widget=self)
-        self.navigation_data_player = NavigationDataPlayer(self.update_navigation_data)
+        # self.navigation_data_player = NavigationDataPlayer(self.update_navigation_data)
 
         ref_frames = [self.world_rf, self.car.car_rf, self.car.camera_rf]
         self.rfs = ReferenceFrames(parent=self, ref_frames=ref_frames)
 
         # Item position tracking
         self.path_planner_position_tracker = PositionTracker(parent=self)
-        self.path_planner_position_tracker.set_active_rf(self.rfs.get_active())
+        self.path_planner_position_tracker.update_rf(self.rfs.get_active())
         self.rf_position_tracker = PositionTracker(parent=self)
         self.rf_position_tracker.position_color = MColors.WHITE
-        self.rf_position_tracker.set_active_rf(self.rfs.get_active())
+        self.rf_position_tracker.update_rf(self.rfs.get_active())
         self.rf_position_tracker.update_items(items=ref_frames)
 
         # Views
@@ -621,14 +641,21 @@ class Map3D(GLViewWidget):
         self._on_camera_change_group: Set[Any] = {self.viewport_axes}
         self._update_on_camera_change()
 
+    def update_data(self, car_x, car_y, car_heading, car_steering_angle, roadmarks, path):
+        items = self.navigation_data.update(roadmarks=roadmarks, path=path)
+        self.car.update(x=car_x, y=car_y, heading_deg=car_heading, steering_angle_deg=car_steering_angle)
+
+        self.path_planner_position_tracker.update_items(items=items)
+        self.rf_position_tracker.update_tracking()
+
     def update_navigation_data(self, *args, **kwargs):
         items = self.navigation_data.update(*args, **kwargs)
         self.path_planner_position_tracker.update_items(items=items)
-        self.rf_position_tracker
 
     def update_car_data(self, x, y, heading, steering_angle):
         self.car.update(x, y, heading, steering_angle)
-        self.rf_position_tracker.refresh_items()
+        self.rf_position_tracker.update_tracking()
+        self.path_planner_position_tracker.update_tracking()
 
     def toggle_top_down_view(self):
         """Toggle between top-down view and normal 3D view with animation."""
@@ -677,8 +704,8 @@ class Map3D(GLViewWidget):
 
     def _on_ref_frame_change(self):
         active_rf = self.rfs.get_active()
-        self.rf_position_tracker.set_active_rf(active_rf)
-        self.path_planner_position_tracker.set_active_rf(active_rf)
+        self.rf_position_tracker.update_rf(active_rf)
+        self.path_planner_position_tracker.update_rf(active_rf)
 
     def keyReleaseEvent(self, event):
         key = event.key()
@@ -719,13 +746,14 @@ class Map3D(GLViewWidget):
         pos = ev.position().toPoint()
         world_x, world_y = self._top_down_screen_to_world(pos.x(), pos.y())
 
-        # Correct for reference frame position
-        # TODO: this only takes into account position, not rotation
-        ref_frame_offset = self.rfs.get_active().get_position()
-        ref_frame_x = world_x - ref_frame_offset.x()
-        ref_frame_y = world_y - ref_frame_offset.y()
-
-        self.mouse_position_2d_label.update_coordinates(x=ref_frame_x, y=ref_frame_y)
+        # Transform from world to rf
+        rf = self.rfs.get_active()
+        tr_world2rf, b = rf.get_transform().inverted()
+        assert b, f"Transform matrix of the '{rf.name}' reference frame could not be inverted"
+        world_point = Vector(world_x, world_y, 0)
+        rf_point = tr_world2rf.map(world_point)
+        
+        self.mouse_position_2d_label.update_coordinates(x=rf_point.x(), y=rf_point.y())
         self.mouse_position_2d_label.update_position(x=pos.x(), y=pos.y())
 
     def _top_down_screen_to_world(self, screen_x, screen_y):

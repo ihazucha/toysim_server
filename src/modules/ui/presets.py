@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
 )
 
 class Fonts:
-    Monospace = QFont("Monospace", 8)
+    OpenGLMonospace = QFont("Monospace", 8)
+    GUIMonospace = QFont("Monospace", 10)
 
 class MColors:
     WHITE = QColor(255, 255, 255, 255)
@@ -41,12 +42,6 @@ class Colors:
     PASTEL_BLUE = "#ADD8E6"
     PASTEL_PURPLE = "#DDA0DD"
     PASTEL_YELLOW = "#FFFFE0"
-
-class DefaultMonospaceFont(QFont):
-    def __init__(self, size=10):
-        super().__init__()
-        self.setStyleHint(QFont.Monospace)
-        self.setPointSize(size)
 
 class FitGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
