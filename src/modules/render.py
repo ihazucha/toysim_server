@@ -70,7 +70,7 @@ class RendererMainWindow(QMainWindow):
         self._gui_fps_samples = deque([0] * 10, maxlen=10)
 
         self._last_update_time = None
-        self._update_fps_samples = deque([0] * 10, maxlen=20) # Average over 10 paints
+        self._update_fps_samples = deque([0] * 10, maxlen=20)  # Average over 10 paints
         # ---
 
     def closeEvent(self, event):
@@ -207,7 +207,7 @@ class RendererMainWindow(QMainWindow):
         )
         status_bar.setSizeGripEnabled(False)
 
-        self.fps_label = QLabel("Data FPS: --") # Rename old label
+        self.fps_label = QLabel("Data FPS: --")  # Rename old label
         self.fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
         status_bar.addPermanentWidget(self.fps_label)
 
@@ -248,6 +248,26 @@ class RendererMainWindow(QMainWindow):
         dt_ms = data.processor_dt_ns / 1e6
         self.processor_dt_plot.update(dt_ms=dt_ms)
 
+        # TODO: calculate offsets dynamically:
+
+        self.map3d_plot.update_data(
+            car_x=0,
+            car_y=0,
+            car_heading=0,
+            car_steering_angle=data.raw.original.vehicle.steering_angle,
+            roadmarks=data.raw.roadmarks_data.roadmarks / 400,
+            path=data.raw.roadmarks_data.path / 400,
+        )
+
+        self.speed_plot.update(
+            measured_speed=data.raw.original.vehicle.speed,
+            target_speed=0,
+            engine_power=0,
+        )
+        self.steering_plot.update(
+            steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
+        )
+
     def update_real_data(self, data: QRealData):
         # --- Data Update Rate ---
         current_time = time.time()
@@ -279,6 +299,10 @@ class RendererMainWindow(QMainWindow):
             measured_speed=data.raw.original.sensor_fusion.avg_speed,
             target_speed=data.raw.original.control.speed,
             engine_power=data.raw.original.actuators.motor_power,
+        )
+        self.steering_plot.update(
+            steering_deg=data.raw.control_data.steering_angle,
+            set_steering_deg=data.raw.control_data.steering_angle,
         )
         encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
         self.left_encoder_plot.update(encoder_data_samples)
@@ -338,7 +362,7 @@ class Renderer:
         window.records_sidebar.record_selected.connect(t_playback.set_current_record)
         window.records_sidebar.record_selected.connect(window.top_tool_bar.handle_record_selected)
 
-        window.records_sidebar.record_selected.emit("1743006114457116600")
+        window.records_sidebar.record_selected.emit("1744726034609610300")
         window.top_tool_bar.playback_toggled.emit(True)
 
         self.app = app

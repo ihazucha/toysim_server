@@ -301,9 +301,11 @@ class HSVColorFilter:
 
 
 class RoadmarksPlannerConfig:
-    def __init__(self, roadmark_min_area: float, roadmark_max_count: int):
-        self.roadmark_min_area = roadmark_min_area
+    def __init__(self, roadmark_max_count: int = 6, roadmark_max_distance = 10, roadmark_min_area: float = 5, roadmark_max_area: float = 10000):
         self.roadmark_max_count = roadmark_max_count
+        self.roadmark_max_distance = roadmark_max_distance
+        self.roadmark_min_area = roadmark_min_area
+        self.roadmark_max_area = roadmark_max_area
 
 
 class RoadmarksPlanner:
@@ -326,7 +328,48 @@ class RoadmarksPlanner:
         self.roadmarks_roadframe = np.array(
             [self.camera.image_xyz_roadframe[u, v][:2] for u, v in self.roadmarks_imgframe]
         )
+        self.roadmarks_roadframe = self.filter_outliers(self.roadmarks_roadframe)
         self.path_roadframe = self.fit_path_param_cubic_spline(self.roadmarks_roadframe)
+
+    def filter_outliers(self, roadmarks: np.ndarray) -> np.ndarray:
+        """
+        Filters out outlier roadmarks by distance.
+        """
+        if len(roadmarks) < 1:
+            return roadmarks
+
+        # Distance from origin (0, 0) filter
+        distances_from_origin = np.linalg.norm(roadmarks, axis=1)
+        roadmarks = roadmarks[distances_from_origin <= self.config.roadmark_max_distance]
+
+        if len(roadmarks) < 3:
+            return roadmarks
+
+        distances = []
+        for i in range(len(roadmarks) - 1):
+            dist = np.linalg.norm(roadmarks[i + 1] - roadmarks[i])
+            distances.append(dist)
+
+        # Median distance filter checks consecutive roadmarks
+        median_distance = np.median(distances)
+        if len(distances) == 2:
+            median_distance = min(distances)
+
+        filtered_roadmarks = []
+        outlier_flags = [False] * len(roadmarks)
+        for i in range(len(roadmarks)):
+            if i > 0:
+                j = i - 1
+                while outlier_flags[j] and j > 0:
+                    j -= 1
+                prev_dist = np.linalg.norm(roadmarks[i] - roadmarks[j])
+                if prev_dist > 3.0 * median_distance:
+                    outlier_flags[i] = True
+
+            if not outlier_flags[i]:
+                filtered_roadmarks.append(roadmarks[i])
+
+        return np.array(filtered_roadmarks)
 
     def get_roadmark_positions(self, bgr_filtered: np.ndarray) -> np.ndarray:
         # TODO: find better way to detect valid roadmarks
@@ -336,13 +379,16 @@ class RoadmarksPlanner:
         for c in contours:
             if len(roadmark_centers) == self.config.roadmark_max_count:
                 break
-            if cv2.contourArea(c) < self.config.roadmark_min_area:
+            c_area = cv2.contourArea(c)
+            if c_area < self.config.roadmark_min_area:
+                continue
+            if c_area > self.config.roadmark_max_area:
                 continue
             u, v, width, height = cv2.boundingRect(c)
             uc, vc = (u + width // 2, v + height // 2)
             roadmark_centers.append((uc, vc))
         return np.array(roadmark_centers)
-
+    
     def fit_path_simple_polyline(self, roadmarks: np.ndarray) -> np.ndarray:
         coeffs = np.polyfit(x=roadmarks[:, 0], y=roadmarks[:, 1], deg=3)
         f = np.poly1d(coeffs)

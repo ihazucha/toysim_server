@@ -2,8 +2,8 @@ from time import time_ns
 
 import numpy as np
 
-from datalink.data import PurePursuitConfig, PurePursuitPIDConfig
-from modules.path_tracking.pid_pure_pursuit import PID, PurePursuit
+from datalink.data import PurePursuitConfig
+from modules.path_tracking.pid_pure_pursuit import PurePursuit
 
 
 class Controller:
@@ -65,33 +65,12 @@ class DualSense(Controller):
         return not (-0.01 < self.v < 0.01)
     
     def is_sa_nonzero(self) -> bool:
-        return not (-0.15 < self.sa < 0.15)
+        return not (-1 < self.sa < 1)
 
     def shutdown(self):
         if self.is_alive():
             self._dualsense.close()
 
-
-class PurePursuitPID(Controller):
-    def __init__(self, config: PurePursuitPIDConfig):
-        super().__init__()
-        self.pp = PurePursuit()
-        self.pid = PID(Kp=1.5, Ki=0, Kd=0)
-        self.set_config(config)
-
-    def update(self, path: np.ndarray, speed: float, dt: float):
-        self.speed = self.pid.update(measured=speed, desired=self.v_setpoint, dt=dt)
-        self.steering_angle = np.rad2deg(self.pp.get_control(path, speed))
-        self.timestamp = time_ns()
-
-    def set_config(self, config: PurePursuitPIDConfig):
-        self.pp.config.lookahead_factor = config.lookahead_factor
-        self.pp.config.lookahead_dist_min = config.lookahead_l_min
-        self.pp.config.lookahead_dist_max = config.lookahead_l_max
-        self.v_setpoint = config.speed_setpoint
-
-    def is_alive(self):
-        return True
 
 class PurePursuitController(Controller):
     def __init__(self, config: PurePursuitConfig):

@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QDoubleValidator
 
 from modules.messaging import messaging
-from datalink.data import PurePursuitPIDConfig
+from datalink.data import PurePursuitConfig
 
 
 class FloatSlider(QWidget):
@@ -19,7 +19,6 @@ class FloatSlider(QWidget):
         super().__init__(parent)
         self.key = key
         self.config_panel = config_panel
-        self.scale_factor = 1000  # Scale factor to convert float to int
         self.init_ui(label_text, min, max, default, step)
 
     def init_ui(self, label_text, min, max, default, step):
@@ -36,12 +35,12 @@ class FloatSlider(QWidget):
         label_layout.addWidget(self.value_input)
 
         self.slider = QSlider(Qt.Horizontal)
-        self.slider.setMinimum(int(min * self.scale_factor))
-        self.slider.setMaximum(int(max * self.scale_factor))
-        self.slider.setValue(int(default * self.scale_factor))
-        self.slider.setSingleStep(int(step * self.scale_factor))
+        self.slider.setMinimum(min)
+        self.slider.setMaximum(max)
+        self.slider.setValue(default)
+        self.slider.setSingleStep(step)
         self.slider.setTickPosition(QSlider.TicksBelow)
-        self.slider.setTickInterval(int(step * self.scale_factor))
+        self.slider.setTickInterval(step)
         self.slider.setFixedWidth(200)
 
         self.slider.valueChanged.connect(self.update_text_input)
@@ -57,27 +56,27 @@ class FloatSlider(QWidget):
         self.setLayout(layout)
 
     def update_text_input(self, value):
-        float_value = value / self.scale_factor
-        step_value = self.slider.singleStep() / self.scale_factor
+        float_value = value
+        step_value = self.slider.singleStep()
         rounded_value = round(float_value / step_value) * step_value
         self.config_panel.update_data(self.key, rounded_value)
         self.value_input.setText(f"{rounded_value:.2f}")
 
     def update_slider_value(self, text):
         try:
-            int_value = int(float(text) * self.scale_factor)
-            if self.slider.minimum() <= int_value <= self.slider.maximum():
+            value = float(text)
+            if self.slider.minimum() <= value <= self.slider.maximum():
                 self.slider.blockSignals(True)
-                self.slider.setValue(int_value)
+                self.slider.setValue(value)
                 self.slider.blockSignals(False)
         except ValueError:
-            pass  # Ignore invalid input
+            pass  # Ignore invalid
 
 
 class ConfigSidebar(QDockWidget):
     def __init__(self, parent=None, default_closed=True):
         super().__init__("Config", parent)
-        self.data = PurePursuitPIDConfig()
+        self.data = PurePursuitConfig.new_simulation()
         self.init_ui()
         self._q_ui = messaging.q_ui.get_producer()
         
@@ -88,45 +87,35 @@ class ConfigSidebar(QDockWidget):
         self.config_widget = QWidget()
         self.setWidget(self.config_widget)
 
-        self.speed_setpoint = FloatSlider(
-            "speed_setpoint",
-            "Speed Setpoint [cm/s]",
-            0,
-            2200,
-            PurePursuitPIDConfig.speed_setpoint,
-            100,
-            self,
-        )
         self.lookahead_factor = FloatSlider(
             "lookahead_factor",
             "Lookahead Factor",
             0,
             10,
-            PurePursuitPIDConfig.lookahead_factor,
+            self.data.lookahead_factor,
             0.05,
             self,
         )
         self.lookahead_l_min = FloatSlider(
-            "lookahead_l_min",
-            "Lookahead Dist Max [cm]",
+            "lookahead_dist_min",
+            "Lookahead Min Distance",
             0,
-            10000,
-            PurePursuitPIDConfig.lookahead_l_min,
-            100,
+            10,
+            self.data.lookahead_dist_min,
+            0.1,
             self,
         )
         self.lookahead_l_max = FloatSlider(
-            "lookahead_l_min",
-            "Lookahead Dist Max [cm]",
+            "lookahead_dist_max",
+            "Lookahead Max Dist",
             0,
-            10000,
-            PurePursuitPIDConfig.lookahead_l_max,
-            100,
+            50,
+            self.data.lookahead_dist_max,
+            0.1,
             self,
         )
 
         layout = QVBoxLayout()
-        layout.addWidget(self.speed_setpoint)
         layout.addWidget(self.lookahead_factor)
         layout.addWidget(self.lookahead_l_min)
         layout.addWidget(self.lookahead_l_max)

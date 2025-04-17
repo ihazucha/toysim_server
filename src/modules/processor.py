@@ -14,12 +14,11 @@ from datalink.data import (
     RealData,
     SimData,
     ControlData,
-    PurePursuitPIDConfig,
     Pose,
     Position,
     Rotation,
 )
-from modules.controller import DualSense, PurePursuitController, PurePursuitPID
+from modules.controller import DualSense, PurePursuitController
 from modules.path_planning.red_roadmarks import (
     RoadmarksPlanner,
     RoadmarksPlannerConfig,
@@ -43,14 +42,14 @@ from enum import Enum
 # Message should be confirmed by the receiver upon delivery with an ACK message
 
 
-def apply_ui_config(controller: PurePursuitPID):
+def apply_ui_config(controller: PurePursuitConfig):
     q_ui = messaging.q_ui.get_consumer()
     while True:
-        config: PurePursuitPIDConfig = q_ui.get()
+        config: PurePursuitConfig = q_ui.get()
         controller.set_config(config)
 
 
-def start_apply_ui_config_thread(controller: PurePursuitPID):
+def start_apply_ui_config_thread(controller: PurePursuitController):
     Thread(target=apply_ui_config, args=[controller], daemon=True).start()
 
 
@@ -72,7 +71,7 @@ def compute_radial_dist(width: int, height: int):
 
 # # TODO: precalculate UV (image coordinates) for all points on the road
 # # TODO: remove None checks - should be empty arrays for more clarity
-def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitPID) -> np.ndarray:
+def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitController) -> np.ndarray:
     image_copy = image.copy()
 
     # Roadmark dots
@@ -105,6 +104,16 @@ class ControllerType(Enum):
     DUALSENSE = "dualsense"
     REDROADMARKS = "redroadmarks"
     REAL_REDROADMARKS = "real_redroadmarks"
+
+
+
+def depth_from_image_center(radial_dist, depth: np.ndarray):
+    """The depth values returned by the UE5 simulation contain scene depth
+    which is measured from each individual pixel to the point it is capturing.
+    This method calculates distance from the image center, which corresponds
+    to the camera location inside the simulation
+    """
+    return np.sqrt(radial_dist + depth.astype(np.float32) ** 2)
 
 
 class Processor(Process):
@@ -148,17 +157,19 @@ class Processor(Process):
         image_shape = (640, 480)
         # TODO: adjust FOV in the simulator to match the RPi camera
         camera = Camera(
-            pose=Pose(Position(0, 250, 0), Rotation(0, -15.05, 0)),
+            pose=Pose(Position(0, 250, 0), Rotation(0, -15.5, 0)),
             image_shape=image_shape,
-            intrinsic_matrix=unreal_engine_intrinsic_matrix(image_shape=image_shape, fov_deg=90),
+            intrinsic_matrix=unreal_engine_intrinsic_matrix(image_shape=image_shape, fov_deg=60),
         )
         planner = RoadmarksPlanner(
             camera=camera,
             filter=HSVColorFilter.new_red(),
             config=RoadmarksPlannerConfig(roadmark_min_area=11, roadmark_max_count=6),
         )
-        controller = PurePursuitPID(config=PurePursuitPIDConfig())
-
+        
+        controller_config = PurePursuitConfig.new_simulation()
+        controller = PurePursuitController(config=controller_config)
+        
         q_simulation = messaging.q_sim.get_consumer()
         q_processing = messaging.q_processing.get_producer()
         q_control = messaging.q_control.get_producer()
@@ -167,14 +178,6 @@ class Processor(Process):
 
         RADIAL_DIST = compute_radial_dist(width=640, height=480)
 
-        def depth_from_image_center(depth: np.ndarray):
-            """The depth values returned by the UE5 simulation contain scene depth
-            which is measured from each individual pixel to the point it is capturing.
-            This method calculates distance from the image center, which corresponds
-            to the camera location inside the simulation
-            """
-            return np.sqrt(RADIAL_DIST + depth.astype(np.float32) ** 2)
-
         # Sync
         _ = SimData.from_bytes(q_simulation.get())
 
@@ -182,18 +185,19 @@ class Processor(Process):
             data: SimData = SimData.from_bytes(q_simulation.get())
             img_bgr = cv2.cvtColor(data.camera.rgb_image, cv2.COLOR_RGB2BGR)
             planner.update(img=img_bgr)
-            controller.update(path=planner.path_roadframe, speed=data.vehicle.speed, dt=data.dt)
-            # print(controller.speed)
+            controller.update(path=planner.path_roadframe, speed=data.vehicle.speed)
             c_data = ControlData(controller.timestamp, 0.05, -controller.steering_angle)
             q_control.put(c_data)
 
             # TODO: should be done by simulation/car
-            depth = depth_from_image_center(data.camera.depth_image)
+            depth = depth_from_image_center(RADIAL_DIST, data.camera.depth_image)
             debug_image = draw_debug_data(data.camera.rgb_image, planner, controller)
+            rm_data = RoadmarksData(roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe)
             p_data = ProcessedSimData(
                 begin_timestamp=q_simulation.last_get_timestamp,
                 debug_image=debug_image,
                 depth=depth,
+                roadmarks_data=rm_data,
                 original=data,
             )
             q_processing.put(p_data)
@@ -202,7 +206,7 @@ class Processor(Process):
         # TODO: obtain data about the camera from the system
         image_shape = (820, 616)
         camera = Camera(
-            pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -15.1, 0)),
+            pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, 0.01, 0)),
             image_shape=image_shape,
             intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
         )
@@ -233,7 +237,9 @@ class Processor(Process):
             controller.update(path=planner.path_roadframe, speed=data.sensor_fusion.avg_speed)
 
             speed = 0.0
-            c_data = ControlData(controller.timestamp, speed, controller.steering_angle)
+            servo_corrected_steering_angle = controller.steering_angle * 3
+            # print(servo_corrected_steering_angle)
+            c_data = ControlData(controller.timestamp, speed, servo_corrected_steering_angle)
 
             if remote_controller.update():
                 if remote_controller.is_v_nonzero():
@@ -250,6 +256,7 @@ class Processor(Process):
             )
             p_data = ProcessedRealData(
                 begin_timestamp=q_real.last_get_timestamp,
+                control_data=c_data,
                 debug_image=debug_image,
                 roadmarks_data=rm_data,
                 original=data,
