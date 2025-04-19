@@ -332,11 +332,11 @@ class RoadmarksPlanner:
         self.path_roadframe = self.fit_path_param_cubic_spline(self.roadmarks_roadframe)
 
     def filter_outliers(self, roadmarks: np.ndarray) -> np.ndarray:
-        """
-        Filters out outlier roadmarks by distance.
-        """
         if len(roadmarks) < 1:
             return roadmarks
+
+        # print(roadmarks[:,0])
+        roadmarks = roadmarks[roadmarks[:,0] >= 0]
 
         # Distance from origin (0, 0) filter
         distances_from_origin = np.linalg.norm(roadmarks, axis=1)

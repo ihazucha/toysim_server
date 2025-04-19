@@ -160,17 +160,21 @@ class TopToolBar(QToolBar):
         icon_pause = create_icon_with_white_background(QStyle.SP_MediaPause, self.style())
 
         a = QAction(icon_play, "Playback", self)
-        a.setShortcut("Ctrl+P")
+        a.setShortcut("Ctrl+Space")
         a.setCheckable(True)
         a.setChecked(False)
         a.setVisible(False)
 
+        def set_icon_state(state: bool):
+            a.setChecked(state)
+            a.setIcon(icon_pause if state else icon_play)
+        
         # Self triggers
         def toggle_playback(state: bool):
-            a.setIcon(icon_pause if state else icon_play)
             self.playback_toggled.emit(state)
 
         a.triggered.connect(toggle_playback)
+        self.playback_toggled.connect(set_icon_state)
 
         # Remote triggers
         def update_on_source_toggled(source: DataSource):

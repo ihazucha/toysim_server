@@ -1,12 +1,17 @@
-from PySide6.QtGui import QFont, QColor
+import numpy as np
+from typing import Iterable
 
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QSizePolicy,
     QGraphicsView,
     QGraphicsScene,
     QGraphicsPixmapItem,
+    QLabel
 )
+
+from pyqtgraph import PlotWidget, mkPen, InfiniteLine
 
 class Fonts:
     OpenGLMonospace = QFont("Monospace", 8)
@@ -29,19 +34,64 @@ class MColors:
 class Colors:
     PRIMARY = "#202020"
     ON_PRIMARY = "#919090"
+    
     SECONDARY = "#1E1E1E"
     ON_SECONDARY = "#878786"
+    
     FOREGROUND = "#131313"
     ON_FOREGROUND = "#565757"
     ON_FOREGROUND_DIM = "#373737"
+    
     ACCENT = "#1A1A1A"
     ON_ACCENT = "#737473"
     ON_ACCENT_DIM = "#4A4A4A"
+    
     GREEN = "#98FB98"
     ORANGE = "#FFCC99"
-    PASTEL_BLUE = "#ADD8E6"
+    PASTEL_BLUE = "#98f9f9"
     PASTEL_PURPLE = "#DDA0DD"
     PASTEL_YELLOW = "#FFFFE0"
+    PASTEL_ORANGE = "#f99898"
+
+
+TOOLTIP_STYLE = f"""
+    QToolTip {{
+        background-color: {Colors.FOREGROUND};
+        color: {Colors.ON_FOREGROUND};
+        border: 2px solid {Colors.ON_FOREGROUND_DIM};
+        border-radius: 5px;
+        padding: 3px;
+        white-space: nowrap;
+    }}
+"""
+
+
+GROUPBOX_STYLE = f"""
+    QGroupBox {{
+        border: 2px solid {Colors.ON_FOREGROUND_DIM};
+        border-radius: 5px;
+        margin-top: 1ex;
+        font-weight: bold;
+        padding: 0px;
+        padding-top: 5px;
+        color: {Colors.ON_PRIMARY};
+    }}
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        subcontrol-position: top left; /* position at the top center */
+        left: 10px;
+        background-color: {Colors.PRIMARY}; /* Use primary color for title background */
+        color: {Colors.ON_PRIMARY};
+    }}
+"""
+
+class CustomTooltipLabel(QLabel):
+    def __init__(self, text: str, tooltip: str, *args, **kwargs):
+        super().__init__(text, *args, **kwargs)
+        self.setToolTip(tooltip)
+        self.setToolTipDuration(0)
+        self.setStyleSheet(TOOLTIP_STYLE)
+        
 
 class FitGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
@@ -66,3 +116,35 @@ class FitGraphicsView(QGraphicsView):
         if not self.pixmap_item.pixmap().isNull():
             self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
         super().resizeEvent(event)
+
+class PlotWidgetHorizontalCursor:
+    def __init__(
+        self, plot_widget: PlotWidget, x_values: Iterable, update_values_at_index_callback: callable
+    ):
+        self.plot_widget = plot_widget
+        self.x_values = x_values
+        self.update_values_at_index_callback = update_values_at_index_callback
+
+        self.plot_widget.setMouseEnabled(x=True, y=False)
+
+        self.vLine = InfiniteLine(
+            angle=90, movable=False, pen=mkPen(color=Colors.ON_ACCENT, width=1)
+        )
+        self.vLine.setVisible(False)
+        self.plot_widget.addItem(self.vLine)
+
+        self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
+
+    def _on_mouse_moved(self, pos):
+        if self.plot_widget.getViewBox().sceneBoundingRect().contains(pos):
+            mouse_point = self.plot_widget.getViewBox().mapSceneToView(pos)
+            x = mouse_point.x()
+            x = np.clip(x, self.x_values[0], self.x_values[-1])
+            self.vLine.setPos(np.round(x))
+            self.vLine.setVisible(True)
+
+            nearest_idx = np.abs(self.x_values - x).argmin()
+            self.update_values_at_index_callback(nearest_idx)
+        else:
+            self.vLine.setVisible(False)
+            self.update_values_at_index_callback(-1)

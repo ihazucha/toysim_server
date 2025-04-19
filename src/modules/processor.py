@@ -19,7 +19,7 @@ from datalink.data import (
     Rotation,
 )
 from modules.controller import DualSense, PurePursuitController
-from modules.path_planning.red_roadmarks import (
+from modules.path_planning.roadmarks import (
     RoadmarksPlanner,
     RoadmarksPlannerConfig,
     Camera,
@@ -102,8 +102,8 @@ def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitCon
 
 class ControllerType(Enum):
     DUALSENSE = "dualsense"
-    REDROADMARKS = "redroadmarks"
-    REAL_REDROADMARKS = "real_redroadmarks"
+    ROADMARKS = "roadmarks"
+    REAL_ROADMARKS = "real_roadmarks"
 
 
 
@@ -122,8 +122,8 @@ class Processor(Process):
         self._controller_type = controller_type
         self._run = {
             ControllerType.DUALSENSE: self._run_dualsense,
-            ControllerType.REDROADMARKS: self._run_redroadmarks,
-            ControllerType.REAL_REDROADMARKS: self._run_real_redroadmarks,
+            ControllerType.ROADMARKS: self._run_roadmarks,
+            ControllerType.REAL_ROADMARKS: self._run_real_roadmarks,
         }.get(self._controller_type)
         assert self._run, f'Unknown controller "{self._controller_type}", stopping..'
 
@@ -152,7 +152,7 @@ class Processor(Process):
             q_control.put(ctrls)
             sleep(0.02)
 
-    def _run_redroadmarks(self):
+    def _run_roadmarks(self):
         # TODO: obtain data about the camera from the system
         image_shape = (640, 480)
         # TODO: adjust FOV in the simulator to match the RPi camera
@@ -202,7 +202,7 @@ class Processor(Process):
             )
             q_processing.put(p_data)
 
-    def _run_real_redroadmarks(self):
+    def _run_real_roadmarks(self):
         # TODO: obtain data about the camera from the system
         image_shape = (820, 616)
         camera = Camera(

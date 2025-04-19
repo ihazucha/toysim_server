@@ -10,15 +10,17 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTabWidget,
     QLabel,
+    QGroupBox,
+    QStyleOptionGroupBox,
 )
 
 from modules.ui.plots import (
     EncoderPlotWidget,
     MapPlotWidget,
-    SteeringPlotWidget,
-    LongitudinalControlWidget,
     LatencyPlotWidget,
 )
+from modules.ui.widgets.long_control import LongitudinalControlWidget
+from modules.ui.widgets.lat_control import LateralControlWidget
 from modules.ui.presets import Colors
 from modules.ui.widgets.map_3d import Map3D
 
@@ -30,7 +32,7 @@ from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
-from modules.ui.presets import Fonts, FitGraphicsView
+from modules.ui.presets import Fonts, FitGraphicsView, GROUPBOX_STYLE
 from modules.ui.settings import WindowSettings
 
 from collections import deque
@@ -49,11 +51,32 @@ def toggle_widget(w: QWidget):
 # -------------------------------------------------------------------------------------------------
 
 
-from collections import deque
-import time
-import cProfile  # Add cProfile
-import pstats  # Add pstats
-import io  # Add io
+class EMALatencyLabel(QLabel):
+    """Exponential Moving Average latency measurement"""
+
+    def __init__(self, name: str, label_update_freq=60):
+        self._name = name
+        self._label_update_freq = label_update_freq
+
+        super().__init__(f"{self._name} FPS: --")
+        self.setStyleSheet(f"color: {Colors.ON_FOREGROUND};")
+
+        self._last_time = time.perf_counter()
+        self._avg_dt = self._last_time
+        self._counter = 0
+        self.alpha = 0.2
+
+    def update(self):
+        t = time.perf_counter()
+        dt = t - self._last_time
+        self._avg_dt = (1 - self.alpha) * self._avg_dt + self.alpha * dt
+        if self._counter == 0:
+            self.setText(
+                f"{self._name}: <span style='font-weight: bold'>{self._avg_dt:.3f}</span> "
+                f"(<span style='font-weight: bold'>{int(1/self._avg_dt)}</span>)"
+            )
+        self._last_time = t
+        self._counter = (self._counter + 1) % self._label_update_freq
 
 
 class RendererMainWindow(QMainWindow):
@@ -66,11 +89,12 @@ class RendererMainWindow(QMainWindow):
         self.settings.load()
 
         # --- FPS Tracking ---
-        self._last_paint_time = None
-        self._gui_fps_samples = deque([0] * 10, maxlen=10)
+        self._last_paint_time = time.perf_counter()
+        self._paint_avg_fps = 0
+        self._paint_frame_count = 0
 
         self._last_update_time = None
-        self._update_fps_samples = deque([0] * 10, maxlen=20)  # Average over 10 paints
+        self._update_fps_samples = deque([0] * 10, maxlen=10)  # Average over 10 paints
         # ---
 
     def closeEvent(self, event):
@@ -132,31 +156,42 @@ class RendererMainWindow(QMainWindow):
     def _init_tab1_layout(self):
         self.rgb_graphics_view = FitGraphicsView(self)
         self.depth_graphics_view = FitGraphicsView(self)
-        self.speed_plot = LongitudinalControlWidget()
-        self.steering_plot = SteeringPlotWidget()
+        self.long_control_widget = LongitudinalControlWidget()
+        self.lat_control_widget = LateralControlWidget()
         self.map_plot = MapPlotWidget()
         self.map3d_plot = Map3D()
 
-        imu_layout = QVBoxLayout()
-        imu_layout.addWidget(self.map_plot, stretch=1)
-        imu_layout.addWidget(self.map3d_plot, stretch=1)
+        # Vision & Position
+        navigation_group = QGroupBox("Navigation")
+        navigation_group.setStyleSheet(GROUPBOX_STYLE)
+        navigation_layout = QVBoxLayout(navigation_group)
+        navigation_layout.addWidget(self.map3d_plot, stretch=2)
 
-        left_layout = QHBoxLayout()
-        left_layout.addLayout(imu_layout)
+        vision_layout = QHBoxLayout()
+        vision_layout.addWidget(self.rgb_graphics_view)
+        vision_layout.addWidget(self.depth_graphics_view)
 
-        middle_layout = QVBoxLayout()
-        middle_layout.addWidget(self.rgb_graphics_view)
-        middle_layout.addWidget(self.depth_graphics_view)
+        navigation_layout.addLayout(vision_layout, stretch=1)
 
-        right_layout = QVBoxLayout()
-        right_layout.addWidget(self.speed_plot)
-        right_layout.addWidget(self.steering_plot)
+        # Longitudinal Control
+        long_control_group = QGroupBox("Longitudinal Control")
+        long_control_group.setStyleSheet(GROUPBOX_STYLE)
+        long_control_layout = QVBoxLayout(long_control_group)
+        long_control_layout.addWidget(self.long_control_widget)
+
+        # Lateral Control
+        lat_control_group = QGroupBox(title="Lateral Control")
+        lat_control_group.setStyleSheet(GROUPBOX_STYLE)
+        lat_control_layout = QVBoxLayout(lat_control_group)
+        lat_control_layout.addWidget(self.lat_control_widget)
+
+        lat_long_layout = QVBoxLayout()
+        lat_long_layout.addWidget(long_control_group)
+        lat_long_layout.addWidget(lat_control_group)
 
         main_layout = QHBoxLayout()
-        main_layout.setSpacing(9)
-        main_layout.addLayout(left_layout, stretch=1)
-        main_layout.addLayout(middle_layout, stretch=1)
-        main_layout.addLayout(right_layout, stretch=1)
+        main_layout.addWidget(navigation_group, stretch=1)
+        main_layout.addLayout(lat_long_layout, stretch=1)
 
         tab1 = QWidget()
         tab1.setLayout(main_layout)
@@ -207,28 +242,30 @@ class RendererMainWindow(QMainWindow):
         )
         status_bar.setSizeGripEnabled(False)
 
-        self.fps_label = QLabel("Data FPS: --")  # Rename old label
-        self.fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
-        status_bar.addPermanentWidget(self.fps_label)
+        # Latency labels
+        latency_label = QLabel(
+            "<span style='font-style: italic'>"
+            "Latency "
+            "<span style='font-weight: bold'>[ms]</span> "
+            "(<span style='font-weight: bold'>FPS</span>)"
+            "</span>"
+        )
+        latency_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND};")
 
-        # Add new label for GUI FPS
-        self.gui_fps_label = QLabel("GUI FPS: --")
-        self.gui_fps_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND}; padding-right: 5px;")
-        status_bar.addPermanentWidget(self.gui_fps_label)
+        self.data_latency_label = EMALatencyLabel(name="Data")
+        self.gui_latency_label = EMALatencyLabel(name="GUI")
+        
+        latency_labels_widget = QWidget()
+        latency_labels_layout = QHBoxLayout(latency_labels_widget)
+        latency_labels_layout.setContentsMargins(0, 3, 10, 5)
+        latency_labels_layout.addWidget(latency_label)
+        latency_labels_layout.addWidget(self.data_latency_label)
+        latency_labels_layout.addWidget(self.gui_latency_label)
+
+        status_bar.addPermanentWidget(latency_labels_widget)
 
     def paintEvent(self, event):
-        """Override paintEvent to measure GUI frame time."""
-        # --- GUI FPS Measurement ---
-        current_paint_time = time.perf_counter()
-        if self._last_paint_time is not None:
-            dt = current_paint_time - self._last_paint_time
-            if dt > 1e-9:
-                fps = 1.0 / dt
-                self._gui_fps_samples.append(fps)
-                avg_fps = sum(self._gui_fps_samples) / len(self._gui_fps_samples)
-                self.gui_fps_label.setText(f"GUI FPS: {avg_fps:.1f}")
-        self._last_paint_time = current_paint_time
-        # ---
+        self.gui_latency_label.update()
         super().paintEvent(event)
 
     def keyPressEvent(self, event):
@@ -259,33 +296,23 @@ class RendererMainWindow(QMainWindow):
             path=data.raw.roadmarks_data.path / 400,
         )
 
-        self.speed_plot.update(
+        self.long_control_widget.update(
             measured_speed=data.raw.original.vehicle.speed,
             target_speed=0,
-            engine_power=0,
+            engine_power_percent=0,
         )
-        self.steering_plot.update(
+        self.lat_control_widget.update(
             steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
         )
 
     def update_real_data(self, data: QRealData):
-        # --- Data Update Rate ---
-        current_time = time.time()
-        if self._last_update_time is not None:
-            dt = current_time - self._last_update_time
-            if dt > 0:
-                fps = 1.0 / dt
-                self._update_fps_samples.append(fps)
-                avg_fps = sum(self._update_fps_samples) / len(self._update_fps_samples)
-                self.fps_label.setText(f"Data FPS: {avg_fps:.1f}")
-        self._last_update_time = current_time
-        #  ---
+        self.data_latency_label.update()
 
-        rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
+        rgb_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
-        rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
-        self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
+        # rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
+        # self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
 
         self.map3d_plot.update_data(
             car_x=0,
@@ -295,14 +322,15 @@ class RendererMainWindow(QMainWindow):
             roadmarks=data.raw.roadmarks_data.roadmarks,
             path=data.raw.roadmarks_data.path,
         )
-        self.speed_plot.update(
+        self.long_control_widget.update(
             measured_speed=data.raw.original.sensor_fusion.avg_speed,
             target_speed=data.raw.original.control.speed,
-            engine_power=data.raw.original.actuators.motor_power,
+            engine_power_percent=data.raw.original.actuators.motor_power * 100,
         )
-        self.steering_plot.update(
-            steering_deg=data.raw.control_data.steering_angle,
-            set_steering_deg=data.raw.control_data.steering_angle,
+        self.lat_control_widget.update(
+            estimated=data.raw.control_data.steering_angle / 3,
+            target=data.raw.control_data.steering_angle / 2,
+            input=data.raw.control_data.steering_angle,
         )
         encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
         self.left_encoder_plot.update(encoder_data_samples)
