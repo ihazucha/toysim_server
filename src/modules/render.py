@@ -6,21 +6,20 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QWidget,
-    QSizePolicy,
     QTabWidget,
     QLabel,
     QGroupBox,
-    QStyleOptionGroupBox,
 )
 
 from modules.ui.plots import (
-    EncoderPlotWidget,
     MapPlotWidget,
     LatencyPlotWidget,
 )
 from modules.ui.widgets.long_control import LongitudinalControlWidget
 from modules.ui.widgets.lat_control import LateralControlWidget
+from modules.ui.widgets.encoder import EncoderWidget
 from modules.ui.presets import Colors
 from modules.ui.widgets.map_3d import Map3D
 
@@ -32,7 +31,7 @@ from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
-from modules.ui.presets import Fonts, FitGraphicsView, GROUPBOX_STYLE
+from modules.ui.presets import Fonts, FitGraphicsView, GROUPBOX_STYLE, TOOLTIP_STYLE
 from modules.ui.settings import WindowSettings
 
 from collections import deque
@@ -88,15 +87,6 @@ class RendererMainWindow(QMainWindow):
         self.settings = WindowSettings(self)
         self.settings.load()
 
-        # --- FPS Tracking ---
-        self._last_paint_time = time.perf_counter()
-        self._paint_avg_fps = 0
-        self._paint_frame_count = 0
-
-        self._last_update_time = None
-        self._update_fps_samples = deque([0] * 10, maxlen=10)  # Average over 10 paints
-        # ---
-
     def closeEvent(self, event):
         self.settings.save()
         event.accept()
@@ -145,15 +135,19 @@ class RendererMainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.setTabPosition(QTabWidget.North)
 
-        tab1 = self._init_tab1_layout()
-        tab2 = self._init_tab2_layout()
+        tab_dashboard = self._init_tab_dashboard_layout()
+        tab_sensors = self._init_tab_sensors_layout()
+        # tab_system = self._init_tab_system_layout()
 
-        self.tabs.addTab(tab1, "Dashboard")
-        self.tabs.addTab(tab2, "Stats")
+        self.tabs.addTab(tab_dashboard, "Dashboard")
+        self.tabs.addTab(tab_sensors, "Sensors")
+        # self.tabs.addTab(tab_system, "System")
+
+        self.tabs.setCurrentIndex(1) # Set "Sensors" tab as default
 
         self.setCentralWidget(self.tabs)
 
-    def _init_tab1_layout(self):
+    def _init_tab_dashboard_layout(self):
         self.rgb_graphics_view = FitGraphicsView(self)
         self.depth_graphics_view = FitGraphicsView(self)
         self.long_control_widget = LongitudinalControlWidget()
@@ -197,35 +191,60 @@ class RendererMainWindow(QMainWindow):
         tab1.setLayout(main_layout)
         return tab1
 
-    def _init_tab2_layout(self):
+    def _init_tab_sensors_layout(self):
+        self.camera_rgb_view = FitGraphicsView(self)
+        self.camera_depth_view = FitGraphicsView(self)
+        camera_group = QGroupBox(title="Camera")
+        camera_group.setStyleSheet(GROUPBOX_STYLE)
+        camera_layout = QHBoxLayout(camera_group)
+        camera_layout.addWidget(self.camera_rgb_view)
+        camera_layout.addWidget(self.camera_depth_view)
+
+        self.left_encoder_plot = EncoderWidget(name="Left Rear")
+        self.right_encoder_plot = EncoderWidget(name="Right Rear")
+        encoders_group = QGroupBox(title="Encoders")
+        encoders_group.setStyleSheet(GROUPBOX_STYLE)
+        encoders_layout = QHBoxLayout(encoders_group)
+        encoders_layout.addWidget(self.left_encoder_plot)
+        encoders_layout.addWidget(self.right_encoder_plot)
+
+        layout = QGridLayout()
+        layout.addWidget(camera_group, 0, 0)
+        layout.addWidget(encoders_group, 1, 0)
+
+        tab = QWidget()
+        tab.setLayout(layout)
+
+        return tab
+
+    def _init_tab_system_layout(self):
         self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
         self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
 
         layout = QHBoxLayout()
-        layout.setSpacing(9)
 
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.processor_period_plot)
         left_layout.addWidget(self.processor_dt_plot)
 
-        right_layout = QVBoxLayout()
-        self.left_encoder_plot = EncoderPlotWidget(name="Left Rear Encoder")
-        self.left_encoder_plot.setMinimumSize(0, 0)
-        self.left_encoder_plot.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        # right_layout = QVBoxLayout()
+        # self.left_encoder_plot = EncoderPlotWidget(name="Left Rear Encoder")
+        # self.left_encoder_plot.setMinimumSize(0, 0)
+        # self.left_encoder_plot.setSizePolicy(
+        #     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        # )
 
-        self.right_encoder_plot = EncoderPlotWidget(name="Right Rear Encoder")
-        self.right_encoder_plot.setMinimumSize(0, 0)
-        self.right_encoder_plot.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        # self.right_encoder_plot = EncoderPlotWidget(name="Right Rear Encoder")
+        # self.right_encoder_plot.setMinimumSize(0, 0)
+        # self.right_encoder_plot.setSizePolicy(
+        #     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        # )
 
-        right_layout.addWidget(self.left_encoder_plot)
-        right_layout.addWidget(self.right_encoder_plot)
+        # right_layout.addWidget(self.left_encoder_plot)
+        # right_layout.addWidget(self.right_encoder_plot)
 
         layout.addLayout(left_layout)
-        layout.addLayout(right_layout)
+        # layout.addLayout(right_layout)
         tab2 = QWidget()
         tab2.setLayout(layout)
         return tab2
@@ -334,11 +353,13 @@ class RendererMainWindow(QMainWindow):
         )
         encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
         self.left_encoder_plot.update(encoder_data_samples)
+        self.right_encoder_plot.update(encoder_data_samples)
 
 
 class Renderer:
     def run(self, return_window=False):
         app = QApplication.instance() or QApplication(sys.argv)
+        app.setStyleSheet(TOOLTIP_STYLE)
         app.setFont(Fonts.GUIMonospace)
         window = RendererMainWindow()
 

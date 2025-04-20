@@ -34,37 +34,51 @@ class SteeringPlotStatsWidget(PlotStatsWidget):
         html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
 
         self.texts = {
-            "estimated": f"Estimated: {html_colored_number.format(Colors.PASTEL_BLUE)} [°]",
-            "target": f"Target: {html_colored_number.format(Colors.PASTEL_BLUE)} [°]",
-            "input": f"Input: {html_colored_number.format(Colors.ORANGE)} [°]",
+            "estimated_wsa": f"Est: {html_colored_number.format(Colors.PASTEL_BLUE)}",
+            "target_wsa": f"Tgt: {html_colored_number.format(Colors.PASTEL_BLUE)}",
+            "error_wsa": f"Err: {html_colored_number.format(Colors.RED)}",
+            "input": f"<span style='font-weight: bold'>SIA</span>: {html_colored_number.format(Colors.ORANGE)}",
         }
 
+        wsa_header_label = CustomTooltipLabel(
+            text="<span style='font-weight: bold'>WSA</span>",
+            tooltip="Wheel Steer Angle"
+        )
+
         self.estimated_sa_label = CustomTooltipLabel(
-            text=self.texts["estimated"].format("--"),
-            tooltip="Estimated (or measured) Wheel Steer Angle (e.g. using vehicle model and IMU data)",
+            text=self.texts["estimated_wsa"].format("--"),
+            tooltip="Estimated (Measured) WSA",
         )
         self.target_sa_label = CustomTooltipLabel(
-            text=self.texts["target"].format("--"),
-            tooltip="Target Wheel Steer Angle set by a controller.",
+            text=self.texts["target_wsa"].format("--"),
+            tooltip="Target WSA as set by the controller",
+        )
+        self.error_sa_label = CustomTooltipLabel(
+            text=self.texts["error_wsa"].format("--"),
+            tooltip="Target - Estimated WSA difference",
         )
 
         self.input_sa_label = CustomTooltipLabel(
             text=self.texts["input"].format("--"),
-            tooltip="Steering Angle is input for the vehicle's steering mechanism (e.g. steering wheel or servo)",
+            tooltip="Steering Input Angle (e.g. steering wheel or servo angle)",
         )
 
+        self.layout.addWidget(wsa_header_label)
         self.layout.addWidget(self.estimated_sa_label)
         self.layout.addWidget(self.target_sa_label)
+        self.layout.addWidget(self.error_sa_label)
         self.layout.addStretch(1)
         self.layout.addWidget(self.input_sa_label)
 
     def update(self, estimated: float, target: float, input: float):
-        est_str = "{:+6.2f}".format(estimated).replace(" ", "&nbsp;")
-        tgt_str = "{:+6.2f}".format(target).replace(" ", "&nbsp;")
-        inp_str = "{:+6.2f}".format(input).replace(" ", "&nbsp;")
+        est_str = "{:6.2f}".format(estimated).replace(" ", "&nbsp;")
+        tgt_str = "{:6.2f}".format(target).replace(" ", "&nbsp;")
+        err_str = "{:6.2f}".format(target - estimated).replace(" ", "&nbsp;")
+        inp_str = "{:6.2f}".format(input).replace(" ", "&nbsp;")
 
-        self.estimated_sa_label.setText(self.texts["estimated"].format(est_str))
-        self.target_sa_label.setText(self.texts["target"].format(tgt_str))
+        self.estimated_sa_label.setText(self.texts["estimated_wsa"].format(est_str))
+        self.target_sa_label.setText(self.texts["target_wsa"].format(tgt_str))
+        self.error_sa_label.setText(self.texts["error_wsa"].format(err_str))
         self.input_sa_label.setText(self.texts["input"].format(inp_str))
 
 
@@ -72,7 +86,7 @@ class SteeringPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
         self.setBackground(Colors.FOREGROUND)
-        self.getPlotItem().setTitle("Wheel Steer Angle | Steering Angle Input")
+        self.getPlotItem().setTitle("Wheel Steer Angle | Steering Input Angle [°]")
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
 
         self._target_sa_data = np.zeros(DATA_QUEUE_SIZE)
@@ -84,7 +98,7 @@ class SteeringPlotWidget(PlotWidget):
         self._target_color = Colors.PASTEL_BLUE
         self._input_color = Colors.ORANGE
 
-        self._update_counter= 0
+        self._update_counter = 0
         self._update_frequency = 2
 
         self._setup_axes()
@@ -138,7 +152,7 @@ class SteeringPlotWidget(PlotWidget):
         input_sa_pen = mkPen(self._input_color, style=Qt.PenStyle.SolidLine, width=1)
         self._input_sa_plot = self.plot(name="Input", pen=input_sa_pen, antialias=True)
         self._input_sa_plot.setData(self._x, self._input_sa_data)
-            
+
     def _update_values_at_index(self, idx):
         parent = self.parent()
 
@@ -170,4 +184,3 @@ class SteeringPlotWidget(PlotWidget):
             self._input_sa_plot.setData(self._x, self._input_sa_data)
 
         self._update_counter = (self._update_counter + 1) % self._update_frequency
-

@@ -57,7 +57,7 @@ class PlotStatsWidget(QFrame):
         """
         )
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(5, 2, 5, 2)
+        self.layout.setContentsMargins(5, 2, 0, 2)
 
 
 class LatencyStatsWidget(PlotStatsWidget):
@@ -440,12 +440,6 @@ class EncoderPlotWidget(QWidget):
         # Add plots to layout
         self.plot_layout.addWidget(self.polar_plot, 1)
 
-        # Add separator line
-        self.separator = QFrame()
-        self.separator.setFrameShape(QFrame.HLine)
-        self.separator.setFrameShadow(QFrame.Sunken)
-        self.separator.setStyleSheet(f"background-color: {Colors.ON_FOREGROUND_DIM};")
-
         # Setup stats display
         self.stats_widget = QFrame()
         self.stats_widget.setStyleSheet(
@@ -475,7 +469,6 @@ class EncoderPlotWidget(QWidget):
 
         # Add widgets to main layout
         self.main_layout.addWidget(self.plot_container, stretch=1)
-        self.main_layout.addWidget(self.separator)
         self.main_layout.addWidget(self.stats_widget)
 
         # Initialize plot items
@@ -543,14 +536,12 @@ class EncoderPlotWidget(QWidget):
         self.rolling_sum_sq = 0
 
     def configure_axes(self, plot):
-        """Common axis styling for all plots"""
         plot.getAxis("left").setPen(self.text_pen)
         plot.getAxis("left").setTextPen(self.text_pen)
         plot.getAxis("bottom").setPen(self.text_pen)
         plot.getAxis("bottom").setTextPen(self.text_pen)
 
     def draw_reference_circle(self, radius):
-        """Draw reference circle with given radius"""
         theta = np.linspace(0, 2 * np.pi, 100)
         x = radius * np.cos(theta)
         y = radius * np.sin(theta)

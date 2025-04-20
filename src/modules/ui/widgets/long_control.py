@@ -9,9 +9,8 @@ from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen
 import pyqtgraph as pg
 
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
-from modules.ui.presets import Colors
+from modules.ui.presets import Colors, CustomTooltipLabel
 
-from time import time
 
 class LongitudinalControlWidget(QWidget):
     def __init__(self):
@@ -37,21 +36,31 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
         html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
 
         self.texts = {
-            "speed": f"Measured: {html_colored_number.format(Colors.GREEN)} [m/s]",
-            "target": f"Target: {html_colored_number.format(Colors.GREEN)} [m/s]",
-            "error": f"Error: {html_colored_number.format(Colors.ON_ACCENT)} [m/s]",
-            "power": f"Power: {html_colored_number.format(Colors.ORANGE)} [%]",
+            "measured_speed": f"Msr: {html_colored_number.format(Colors.GREEN)}",
+            "target_speed": f"Tgt: {html_colored_number.format(Colors.GREEN)}",
+            "error_speed": f"Err: {html_colored_number.format(Colors.RED)}",
+            "power": f"<span style='font-weight: bold;'>Power</span>: {html_colored_number.format(Colors.ORANGE)}",
         }
 
-        # Left
-        self.speed_label = QLabel(self.texts["speed"].format(0.0))
-        self.target_label = QLabel(self.texts["target"].format(0.0))
-        self.error_label = QLabel(self.texts["error"].format(0.0))
+        speed_header_label = CustomTooltipLabel("<span style='font-weight: bold;'>Speed</span>")
+        self.speed_label = CustomTooltipLabel(
+            text=self.texts["measured_speed"].format('--'),
+            tooltip="Measured (Estimated) speed"
+        )
+        self.target_label = CustomTooltipLabel(
+            text=self.texts["target_speed"].format('--'),
+            tooltip="Target speed as set by the controller"
+        )
+        self.error_label = CustomTooltipLabel(
+            text=self.texts["error_speed"].format('--'),
+            tooltip="Target - Measured speed difference"
+        )
+        self.power_label = CustomTooltipLabel(
+            text=self.texts["power"].format('--'),
+            tooltip="Engine power as % of max. power"
+        )
 
-        # Right
-        self.power_label = QLabel(self.texts["power"].format(0.0))
-        self.power_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
+        self.layout.addWidget(speed_header_label)
         self.layout.addWidget(self.speed_label)
         self.layout.addWidget(self.target_label)
         self.layout.addWidget(self.error_label)
@@ -59,29 +68,24 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
         self.layout.addWidget(self.power_label)
 
     def update(self, measured_speed: float, target_speed: float, engine_power_percent: float):
-        ms_str = "{:+6.2f}".format(measured_speed).replace(" ", "&nbsp;")
-        ts_str = "{:+6.2f}".format(target_speed).replace(" ", "&nbsp;")
-        err_str = "{:+6.2f}".format(measured_speed - target_speed).replace(" ", "&nbsp;")
-        ep_str = "{:+6.2f}".format(engine_power_percent).replace(" ", "&nbsp;")
+        ms_str = "{:6.2f}".format(measured_speed).replace(" ", "&nbsp;")
+        ts_str = "{:6.2f}".format(target_speed).replace(" ", "&nbsp;")
+        err_str = "{:6.2f}".format(target_speed - measured_speed).replace(" ", "&nbsp;")
+        ep_str = "{:7.2f}".format(engine_power_percent).replace(" ", "&nbsp;")
 
-        self.speed_label.setText(self.texts["speed"].format(ms_str))
-        self.target_label.setText(self.texts["target"].format(ts_str))
-        self.error_label.setText(self.texts["error"].format(err_str))
+        self.speed_label.setText(self.texts["measured_speed"].format(ms_str))
+        self.target_label.setText(self.texts["target_speed"].format(ts_str))
+        self.error_label.setText(self.texts["error_speed"].format(err_str))
         self.power_label.setText(self.texts["power"].format(ep_str))
 
 
 class SpeedPlotWidget(PlotWidget):
-    def paintEvent(self, ev):
-        t = time()
-        super().paintEvent(ev)
-        print(f"\r{time() - t}", end="")
-        
     def __init__(self):
         super().__init__()
         
         self.setBackground(Colors.FOREGROUND)
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
-        self.getPlotItem().setTitle("Speed | Power")
+        self.getPlotItem().setTitle("Speed [m/s] | Power [%]")
         
         self.speed_color = Colors.GREEN
         self.power_color = Colors.ORANGE
@@ -99,7 +103,7 @@ class SpeedPlotWidget(PlotWidget):
         self._rescale_counter = 0
         self._rescale_frequency = 10
         self._rescale_min_range = 2.0
-        self._rescale_y_padding = 1.0
+        self._rescale_y_padding = 0.5
 
         self._setup_axes()
         self._setup_legend()

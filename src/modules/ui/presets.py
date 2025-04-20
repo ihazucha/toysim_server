@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
     QGraphicsPixmapItem,
-    QLabel
+    QLabel,
 )
 
 from pyqtgraph import PlotWidget, mkPen, InfiniteLine
@@ -47,6 +47,7 @@ class Colors:
     ON_ACCENT_DIM = "#4A4A4A"
     
     GREEN = "#98FB98"
+    RED = "#FB9898"
     ORANGE = "#FFCC99"
     PASTEL_BLUE = "#98f9f9"
     PASTEL_PURPLE = "#DDA0DD"
@@ -60,11 +61,10 @@ TOOLTIP_STYLE = f"""
         color: {Colors.ON_FOREGROUND};
         border: 2px solid {Colors.ON_FOREGROUND_DIM};
         border-radius: 5px;
-        padding: 3px;
         white-space: nowrap;
+        padding: 2px;
     }}
 """
-
 
 GROUPBOX_STYLE = f"""
     QGroupBox {{
@@ -73,7 +73,7 @@ GROUPBOX_STYLE = f"""
         margin-top: 1ex;
         font-weight: bold;
         padding: 0px;
-        padding-top: 5px;
+        padding-top: 3px;
         color: {Colors.ON_PRIMARY};
     }}
     QGroupBox::title {{
@@ -86,12 +86,11 @@ GROUPBOX_STYLE = f"""
 """
 
 class CustomTooltipLabel(QLabel):
-    def __init__(self, text: str, tooltip: str, *args, **kwargs):
+    def __init__(self, text: str, tooltip: str | None = None, *args, **kwargs):
         super().__init__(text, *args, **kwargs)
-        self.setToolTip(tooltip)
-        self.setToolTipDuration(0)
-        self.setStyleSheet(TOOLTIP_STYLE)
-        
+        if tooltip:
+            self.setToolTip(tooltip)
+            self.setToolTipDuration(0)
 
 class FitGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
