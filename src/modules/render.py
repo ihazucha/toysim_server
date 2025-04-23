@@ -221,33 +221,17 @@ class RendererMainWindow(QMainWindow):
         self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
         self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
 
-        layout = QHBoxLayout()
-
         left_layout = QVBoxLayout()
         left_layout.addWidget(self.processor_period_plot)
         left_layout.addWidget(self.processor_dt_plot)
 
-        # right_layout = QVBoxLayout()
-        # self.left_encoder_plot = EncoderPlotWidget(name="Left Rear Encoder")
-        # self.left_encoder_plot.setMinimumSize(0, 0)
-        # self.left_encoder_plot.setSizePolicy(
-        #     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        # )
-
-        # self.right_encoder_plot = EncoderPlotWidget(name="Right Rear Encoder")
-        # self.right_encoder_plot.setMinimumSize(0, 0)
-        # self.right_encoder_plot.setSizePolicy(
-        #     QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        # )
-
-        # right_layout.addWidget(self.left_encoder_plot)
-        # right_layout.addWidget(self.right_encoder_plot)
-
+        layout = QHBoxLayout()
         layout.addLayout(left_layout)
-        # layout.addLayout(right_layout)
-        tab2 = QWidget()
-        tab2.setLayout(layout)
-        return tab2
+
+        tab = QWidget()
+        tab.setLayout(layout)
+
+        return tab
 
     def _init_status_bar(self):
         status_bar = self.statusBar()
@@ -262,13 +246,7 @@ class RendererMainWindow(QMainWindow):
         status_bar.setSizeGripEnabled(False)
 
         # Latency labels
-        latency_label = QLabel(
-            "<span style='font-style: italic'>"
-            "Latency "
-            "<span style='font-weight: bold'>[ms]</span> "
-            "(<span style='font-weight: bold'>FPS</span>)"
-            "</span>"
-        )
+        latency_label = QLabel("<span style='font-weight: bold'>Latency</span> [ms] (FPS)")
         latency_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND};")
 
         self.data_latency_label = EMALatencyLabel(name="Data")

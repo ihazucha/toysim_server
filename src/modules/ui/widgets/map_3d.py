@@ -1,5 +1,4 @@
 from enum import Enum
-from math import isclose
 import sys
 
 sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
@@ -20,7 +19,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGridLayout,
     QGroupBox,
-    QSizePolicy,
 )
 
 from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem

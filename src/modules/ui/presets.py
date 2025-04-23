@@ -85,7 +85,7 @@ GROUPBOX_STYLE = f"""
     }}
 """
 
-class CustomTooltipLabel(QLabel):
+class TooltipLabel(QLabel):
     def __init__(self, text: str, tooltip: str | None = None, *args, **kwargs):
         super().__init__(text, *args, **kwargs)
         if tooltip:

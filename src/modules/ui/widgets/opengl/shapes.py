@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple
 
-from pyqtgraph import Vector
+from pyqtgraph import Vector, Transform3D
 from pyqtgraph.opengl.MeshData import MeshData
 from pyqtgraph.opengl.items.GLMeshItem import GLMeshItem
 from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
@@ -40,7 +40,42 @@ customWorldLight = ShaderProgram('customWorldLight', [
     ),
 ])
 
+customNormalColor = ShaderProgram('customNormalColor', [
+    VertexShader("""
+        uniform mat4 u_mvp;
+        attribute vec4 a_position;
+        attribute vec3 a_normal;
+        attribute vec4 a_color;
+        varying vec4 v_color;
+        varying vec3 v_normal;
+        void main() {
+            v_normal = normalize(a_normal); 
+            v_color = a_color;
+            gl_Position = u_mvp * a_position;
+        }
+    """),
+    FragmentShader("""
+        #ifdef GL_ES
+        precision mediump float;
+        #endif
+        varying vec4 v_color;
+        varying vec3 v_normal;
 
+        const vec3 targetRed   = vec3(1.0, 40.0/255.0, 40.0/255.0);
+        const vec3 targetGreen = vec3(40.0/255.0, 1.0, 40.0/255.0);
+        const vec3 targetBlue  = vec3(40.0/255.0, 40.0/255.0, 1.0);
+
+        void main() {
+            // Opposite directions are colored same
+            float nx = abs(v_normal.x);
+            float ny = abs(v_normal.y);
+            float nz = abs(v_normal.z);
+
+            vec3 blended_rgb = nx * targetRed + ny * targetGreen + nz * targetBlue;
+            gl_FragColor = vec4(blended_rgb, 0.75);
+        }
+    """)
+])
 
 class CubeMesh(MeshData):
     VERTEXES = np.array(
@@ -77,15 +112,16 @@ class CubeMesh(MeshData):
 
 
 class OpaqueCube(GLMeshItem):
-    def __init__(self, parentItem=None, size: float = 0, color=MColors.WHITE, *args, **kwargs):
+    def __init__(self, parentItem=None, size: float = 0, color=MColors.WHITE, shader="shaded", glOptions="opaque", *args, **kwargs):
         self.size = size
+
         super().__init__(
             parentItem,
             meshdata=CubeMesh(size=size),
             color=color,
-            shader="shaded",
+            shader=shader,
             smooth=False,
-            glOptions="opaque",
+            glOptions=glOptions,
             *args,
             **kwargs,
         )
@@ -170,7 +206,7 @@ class OpaqueCylinder(GLMeshItem):
         self.radius = radius
         self.height = height
         self.segments = segments
-        
+
         super().__init__(
             parentItem=parentItem,
             meshdata=CylinderMesh(radius=radius, height=height, segments=segments),
@@ -184,6 +220,43 @@ class OpaqueCylinder(GLMeshItem):
             *args,
             **kwargs
         )
+
+    def get_position(self):
+        return Vector(self.transform().matrix()[:3, 3])
+    
+    def get_transform(self):
+        return self.transform()
+
+class Cone(GLMeshItem):
+    def __init__(self, 
+        parentItem=None, 
+        rows=32,
+        cols=32,
+        radius: tuple=(0.2, 0), 
+        length=1.0, 
+        color=MColors.WHITE,
+        drawEdges=True,
+        drawFaces=False,
+        shader=customWorldLight,
+        glOptions="opaque",
+        base_transform: Transform3D=Transform3D(),
+        *args, **kwargs
+    ):
+        self.base_transform = base_transform
+        super().__init__(
+            parentItem=parentItem,
+            meshdata=MeshData.cylinder(rows=rows, cols=cols, radius=radius, length=length),
+            color=color,
+            edgeColor=color,
+            drawEdges=drawEdges,
+            drawFaces=drawFaces,
+            shader=shader,
+            smooth=True,
+            glOptions=glOptions,
+            *args,
+            **kwargs
+        )
+        self.setTransform(self.base_transform)
 
     def get_position(self):
         return Vector(self.transform().matrix()[:3, 3])

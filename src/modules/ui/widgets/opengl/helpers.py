@@ -1,4 +1,3 @@
-from tkinter.font import Font
 import numpy as np
 
 from PySide6.QtCore import QPointF
@@ -47,12 +46,17 @@ def get_camera_ground_intersection(cam_position: Vector, cam_direction: Vector):
 
 
 class ReferenceFrame:
-    def __init__(self, parent_widget: GLViewWidget, name: str, abbrev: str = None, size=0.025):
-        assert len(name) > 0, "Come on, you can figure out a 1-letter name"
+    def __init__(
+        self,
+        parent_widget: GLViewWidget,
+        name: str,
+        size=0.025,
+        show_cube=True,
+    ):
         self.parent_widget = parent_widget
         self.name = name
-        self.abbrev = abbrev if abbrev else name[0]
         self.size = size
+        self.show_cube = show_cube
 
         self._is_focused = False
         self._scale_factor = 1
@@ -61,20 +65,18 @@ class ReferenceFrame:
         self._default_font = QFont(Fonts.OpenGLMonospace)
         self._default_font.setBold(True)
 
-        self.x = GLLinePlotItem(
-            pos=np.array([[0] * 3, [size, 0, 0]]), color=MColors.RED, width=3, antialias=True
-        )
-        self.y = GLLinePlotItem(
-            pos=np.array([[0] * 3, [0, size, 0]]), color=MColors.GREEN, width=3, antialias=True
-        )
-        self.z = GLLinePlotItem(
-            pos=np.array([[0] * 3, [0, 0, size]]), color=MColors.BLUE, width=3, antialias=True
-        )
+        x_line = np.array([[0] * 3, [size, 0, 0]])
+        self.x = GLLinePlotItem(pos=x_line, color=MColors.RED, width=3, antialias=True)
+        y_line = np.array([[0] * 3, [0, size, 0]])
+        self.y = GLLinePlotItem(pos=y_line, color=MColors.GREEN, width=3, antialias=True)
+        z_line = np.array([[0] * 3, [0, 0, size]])
+        self.z = GLLinePlotItem(pos=z_line, color=MColors.BLUE, width=3, antialias=True)
         self.xyz_lines = [self.x, self.y, self.z]
 
         radius = size / 8
         self.origin_offset = Vector(*[-radius / 2] * 3)
         self.origin = OpaqueCube(size=radius)
+        self.origin.setDepthValue(-1)
         self.label_offset = Vector(-0.005, -0.005, 0.01)
         self.origin_label = GLTextItem(
             pos=self.origin_offset, color=self._default_color, font=self._default_font
@@ -95,8 +97,10 @@ class ReferenceFrame:
 
         tr.translate(self.origin_offset)
         self.origin.setTransform(tr)
+
         if self._is_focused:
             tr.translate(self.label_offset)
+
         self.origin_label.setTransform(tr)
         self._update_origin_label()
 
@@ -107,12 +111,12 @@ class ReferenceFrame:
 
         # Calculate new size based on active state
         current_size = self.size * (1.5 if focused else 1.0)
-        
+
         # Update axes with new size
-        for line, direction in zip(self.xyz_lines, [(1,0,0), (0,1,0), (0,0,1)]):
+        for line, direction in zip(self.xyz_lines, [(1, 0, 0), (0, 1, 0), (0, 0, 1)]):
             end_point = [d * current_size for d in direction]
             line.setData(pos=np.array([[0, 0, 0], end_point]))
-        
+
         if self._is_focused:
             font = QFont(self._default_font)
             self.origin_label.setData(color=MColors.ORANGE, font=font)
@@ -120,7 +124,7 @@ class ReferenceFrame:
         else:
             self.scale_factor = 1
             self.origin_label.setData(color=self._default_color, font=self._default_font)
-        
+
         self.setTransform(self.get_transform())
 
     def is_focused(self) -> bool:
@@ -133,7 +137,8 @@ class ReferenceFrame:
         for line in self.xyz_lines:
             widget.addItem(line)
 
-        widget.addItem(self.origin)
+        if self.show_cube:
+            widget.addItem(self.origin)
         widget.addItem(self.origin_label)
 
 

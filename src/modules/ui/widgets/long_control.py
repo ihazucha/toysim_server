@@ -9,7 +9,7 @@ from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen
 import pyqtgraph as pg
 
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
-from modules.ui.presets import Colors, CustomTooltipLabel
+from modules.ui.presets import Colors, TooltipLabel
 
 
 class LongitudinalControlWidget(QWidget):
@@ -42,20 +42,20 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
             "power": f"<span style='font-weight: bold;'>Power</span>: {html_colored_number.format(Colors.ORANGE)}",
         }
 
-        speed_header_label = CustomTooltipLabel("<span style='font-weight: bold;'>Speed</span>")
-        self.speed_label = CustomTooltipLabel(
+        speed_header_label = TooltipLabel("<span style='font-weight: bold;'>Speed</span>")
+        self.speed_label = TooltipLabel(
             text=self.texts["measured_speed"].format('--'),
             tooltip="Measured (Estimated) speed"
         )
-        self.target_label = CustomTooltipLabel(
+        self.target_label = TooltipLabel(
             text=self.texts["target_speed"].format('--'),
             tooltip="Target speed as set by the controller"
         )
-        self.error_label = CustomTooltipLabel(
+        self.error_label = TooltipLabel(
             text=self.texts["error_speed"].format('--'),
             tooltip="Target - Measured speed difference"
         )
-        self.power_label = CustomTooltipLabel(
+        self.power_label = TooltipLabel(
             text=self.texts["power"].format('--'),
             tooltip="Engine power as % of max. power"
         )

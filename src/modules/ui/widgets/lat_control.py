@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 from pyqtgraph import PlotWidget, mkPen
 
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
-from modules.ui.presets import Colors, CustomTooltipLabel, PlotWidgetHorizontalCursor
+from modules.ui.presets import Colors, TooltipLabel, PlotWidgetHorizontalCursor
 
 
 class LateralControlWidget(QWidget):
@@ -40,25 +40,25 @@ class SteeringPlotStatsWidget(PlotStatsWidget):
             "input": f"<span style='font-weight: bold'>SIA</span>: {html_colored_number.format(Colors.ORANGE)}",
         }
 
-        wsa_header_label = CustomTooltipLabel(
+        wsa_header_label = TooltipLabel(
             text="<span style='font-weight: bold'>WSA</span>",
             tooltip="Wheel Steer Angle"
         )
 
-        self.estimated_sa_label = CustomTooltipLabel(
+        self.estimated_sa_label = TooltipLabel(
             text=self.texts["estimated_wsa"].format("--"),
             tooltip="Estimated (Measured) WSA",
         )
-        self.target_sa_label = CustomTooltipLabel(
+        self.target_sa_label = TooltipLabel(
             text=self.texts["target_wsa"].format("--"),
             tooltip="Target WSA as set by the controller",
         )
-        self.error_sa_label = CustomTooltipLabel(
+        self.error_sa_label = TooltipLabel(
             text=self.texts["error_wsa"].format("--"),
             tooltip="Target - Estimated WSA difference",
         )
 
-        self.input_sa_label = CustomTooltipLabel(
+        self.input_sa_label = TooltipLabel(
             text=self.texts["input"].format("--"),
             tooltip="Steering Input Angle (e.g. steering wheel or servo angle)",
         )
