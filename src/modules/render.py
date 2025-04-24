@@ -21,7 +21,9 @@ from modules.ui.widgets.long_control import LongitudinalControlWidget
 from modules.ui.widgets.lat_control import LateralControlWidget
 from modules.ui.widgets.encoder import EncoderWidget
 from modules.ui.presets import Colors
-from modules.ui.widgets.map_3d import Map3D
+from modules.ui.widgets.map3d import Map3D
+from modules.ui.widgets.imu3d import IMU3D
+from modules.ui.widgets.imu import GyroWidget
 
 from modules.messaging import messaging
 from utils.paths import icon_path
@@ -31,10 +33,9 @@ from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
-from modules.ui.presets import Fonts, FitGraphicsView, GROUPBOX_STYLE, TOOLTIP_STYLE
+from modules.ui.presets import Fonts, FitGraphicsView, APP_STYLE
 from modules.ui.settings import WindowSettings
 
-from collections import deque
 import time
 
 
@@ -157,7 +158,6 @@ class RendererMainWindow(QMainWindow):
 
         # Vision & Position
         navigation_group = QGroupBox("Navigation")
-        navigation_group.setStyleSheet(GROUPBOX_STYLE)
         navigation_layout = QVBoxLayout(navigation_group)
         navigation_layout.addWidget(self.map3d_plot, stretch=2)
 
@@ -169,13 +169,11 @@ class RendererMainWindow(QMainWindow):
 
         # Longitudinal Control
         long_control_group = QGroupBox("Longitudinal Control")
-        long_control_group.setStyleSheet(GROUPBOX_STYLE)
         long_control_layout = QVBoxLayout(long_control_group)
         long_control_layout.addWidget(self.long_control_widget)
 
         # Lateral Control
         lat_control_group = QGroupBox(title="Lateral Control")
-        lat_control_group.setStyleSheet(GROUPBOX_STYLE)
         lat_control_layout = QVBoxLayout(lat_control_group)
         lat_control_layout.addWidget(self.lat_control_widget)
 
@@ -192,25 +190,51 @@ class RendererMainWindow(QMainWindow):
         return tab1
 
     def _init_tab_sensors_layout(self):
+        # Camera
         self.camera_rgb_view = FitGraphicsView(self)
         self.camera_depth_view = FitGraphicsView(self)
         camera_group = QGroupBox(title="Camera")
-        camera_group.setStyleSheet(GROUPBOX_STYLE)
         camera_layout = QHBoxLayout(camera_group)
         camera_layout.addWidget(self.camera_rgb_view)
         camera_layout.addWidget(self.camera_depth_view)
 
+        # Encoders
         self.left_encoder_plot = EncoderWidget(name="Left Rear")
         self.right_encoder_plot = EncoderWidget(name="Right Rear")
         encoders_group = QGroupBox(title="Encoders")
-        encoders_group.setStyleSheet(GROUPBOX_STYLE)
         encoders_layout = QHBoxLayout(encoders_group)
         encoders_layout.addWidget(self.left_encoder_plot)
         encoders_layout.addWidget(self.right_encoder_plot)
 
+        # IMU
+        self.imu3d_plot = IMU3D()
+        self.imu_gyro_plot = GyroWidget()
+        self.imu_accel_plot = GyroWidget()
+        self.imu_mag_plot = GyroWidget()
+        self.imu_rotation_plot = GyroWidget()
+
+        imu_rotation_layout = QVBoxLayout()
+        imu_rotation_layout.addWidget(self.imu3d_plot, stretch=1)
+        imu_rotation_layout.addWidget(self.imu_rotation_plot, stretch=1)
+        
+        imu_components_layout = QVBoxLayout()
+        imu_components_layout.addWidget(self.imu_accel_plot, stretch=1)
+        imu_components_layout.addWidget(self.imu_gyro_plot, stretch=1)
+        imu_components_layout.addWidget(self.imu_mag_plot, stretch=1)
+
+        imu_group = QGroupBox(title="IMU")
+        imu_layout = QHBoxLayout(imu_group)
+        imu_layout.addLayout(imu_rotation_layout)
+        imu_layout.addLayout(imu_components_layout)
+
         layout = QGridLayout()
         layout.addWidget(camera_group, 0, 0)
         layout.addWidget(encoders_group, 1, 0)
+        layout.addWidget(imu_group, 0, 1, 2, 2)
+        layout.setRowStretch(0, 1)
+        layout.setRowStretch(1, 1)
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 2)
 
         tab = QWidget()
         tab.setLayout(layout)
@@ -303,8 +327,12 @@ class RendererMainWindow(QMainWindow):
         )
 
     def update_real_data(self, data: QRealData):
+        # App Window
+        # ----------
         self.data_latency_label.update()
 
+        # Dashboard
+        # ----------
         rgb_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
@@ -329,15 +357,20 @@ class RendererMainWindow(QMainWindow):
             target=data.raw.control_data.steering_angle / 2,
             input=data.raw.control_data.steering_angle,
         )
+
+        # Sensors
+        # ----------
         encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
         self.left_encoder_plot.update(encoder_data_samples)
         self.right_encoder_plot.update(encoder_data_samples)
+
+        self.imu3d_plot.update_data(quaternion=data.raw.original.sensor_fusion.imu.qu)
 
 
 class Renderer:
     def run(self, return_window=False):
         app = QApplication.instance() or QApplication(sys.argv)
-        app.setStyleSheet(TOOLTIP_STYLE)
+        app.setStyleSheet(APP_STYLE)
         app.setFont(Fonts.GUIMonospace)
         window = RendererMainWindow()
 
@@ -389,8 +422,8 @@ class Renderer:
         window.records_sidebar.record_selected.connect(t_playback.set_current_record)
         window.records_sidebar.record_selected.connect(window.top_tool_bar.handle_record_selected)
 
-        window.records_sidebar.record_selected.emit("1744726034609610300")
-        window.top_tool_bar.playback_toggled.emit(True)
+        # window.records_sidebar.record_selected.emit("1744726034609610300")
+        # window.top_tool_bar.playback_toggled.emit(True)
 
         self.app = app
         self.window = window

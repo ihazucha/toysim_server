@@ -85,6 +85,13 @@ GROUPBOX_STYLE = f"""
     }}
 """
 
+APP_STYLE_LIST = [
+    TOOLTIP_STYLE,
+    GROUPBOX_STYLE,
+]
+
+APP_STYLE = "\n".join(APP_STYLE_LIST)
+
 class TooltipLabel(QLabel):
     def __init__(self, text: str, tooltip: str | None = None, *args, **kwargs):
         super().__init__(text, *args, **kwargs)

@@ -243,6 +243,7 @@ class Cone(GLMeshItem):
         *args, **kwargs
     ):
         self.base_transform = base_transform
+        self.length=length
         super().__init__(
             parentItem=parentItem,
             meshdata=MeshData.cylinder(rows=rows, cols=cols, radius=radius, length=length),
