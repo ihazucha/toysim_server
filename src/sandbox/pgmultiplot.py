@@ -1,67 +1,93 @@
-#!/usr/bin/python
 """
-Test the speed of rapidly updating multiple plot curves
+This example demonstrates the creation of a plot with 
+DateAxisItem and a customized ViewBox. 
 """
-import argparse
-import itertools
+
 
 import numpy as np
-from utils import FrameCounter
 
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--iterations', default=float('inf'), type=float,
-    help="Number of iterations to run before exiting"
-)
-args = parser.parse_args()
-iterations_counter = itertools.count()
 
-# pg.setConfigOptions(useOpenGL=True)
-app = pg.mkQApp("MultiPlot Speed Test")
+class CustomViewBox(pg.ViewBox):
+    def __init__(self, *args, **kwds):
+        kwds['enableMenu'] = False
+        pg.ViewBox.__init__(self, *args, **kwds)
+        self.setMouseMode(self.RectMode)
+        
+    ## reimplement right-click to zoom out
+    def mouseClickEvent(self, ev):
+        if ev.button() == QtCore.Qt.MouseButton.RightButton:
+            self.autoRange()
+    
+    ## reimplement mouseDragEvent to disable continuous axis zoom
+    def mouseDragEvent(self, ev, axis=None):
+        if axis is not None and ev.button() == QtCore.Qt.MouseButton.RightButton:
+            ev.ignore()
+        else:
+            pg.ViewBox.mouseDragEvent(self, ev, axis=axis)
 
-plot = pg.plot()
-plot.setWindowTitle('pyqtgraph example: MultiPlotSpeedTest')
-plot.setLabel('bottom', 'Index', units='B')
+class CustomTickSliderItem(pg.TickSliderItem):
+    def __init__(self, *args, **kwds):
+        pg.TickSliderItem.__init__(self, *args, **kwds)
+        
+        self.all_ticks = {}
+        self._range = [0,1]
+    
+    def setTicks(self, ticks):
+        for tick, pos in self.listTicks():
+            self.removeTick(tick)
+        
+        for pos in ticks:
+            tickItem = self.addTick(pos, movable=False, color="#333333")
+            self.all_ticks[pos] = tickItem
+        
+        self.updateRange(None, self._range)
+    
+    def updateRange(self, vb, viewRange):
+        origin = self.tickSize/2.
+        length = self.length
 
-nPlots = 100
-nSamples = 500
-curves = []
-for idx in range(nPlots):
-    curve = pg.PlotCurveItem(pen=({'color': (idx, nPlots*1.3), 'width': 1}), skipFiniteCheck=True)
-    plot.addItem(curve)
-    curve.setPos(0,idx*6)
-    curves.append(curve)
+        lengthIncludingPadding = length + self.tickSize + 2
+        
+        self._range = viewRange
+        
+        for pos in self.all_ticks:
+            tickValueIncludingPadding = (pos - viewRange[0]) / (viewRange[1] - viewRange[0])
+            tickValue = (tickValueIncludingPadding*lengthIncludingPadding - origin) / length
+            
+            # Convert from np.bool_ to bool for setVisible
+            visible = bool(tickValue >= 0 and tickValue <= 1)
+            
+            tick = self.all_ticks[pos]
+            tick.setVisible(visible)
 
-plot.setYRange(0, nPlots*6)
-plot.setXRange(0, nSamples)
-plot.resize(600,900)
+            if visible:
+                self.setTickValue(tick, tickValue)
 
-rgn = pg.LinearRegionItem([nSamples/5.,nSamples/3.])
-plot.addItem(rgn)
+app = pg.mkQApp()
 
+axis = pg.DateAxisItem(orientation='bottom')
+vb = CustomViewBox()
 
-data = np.random.normal(size=(nPlots*23,nSamples))
-ptr = 0
-def update():
-    global ptr
-    if next(iterations_counter) > args.iterations:
-        timer.stop()
-        app.quit()
-        return None
-    for i in range(nPlots):
-        curves[i].setData(data[(ptr+i)%data.shape[0]])
+pw = pg.PlotWidget(viewBox=vb, axisItems={'bottom': axis}, enableMenu=False, title="PlotItem with DateAxisItem, custom ViewBox and markers on x axis<br>Menu disabled, mouse behavior changed: left-drag to zoom, right-click to reset zoom")
 
-    ptr += nPlots
-    framecnt.update()
+dates = np.arange(8) * (3600*24*356)
+pw.plot(x=dates, y=[1,6,2,4,3,5,6,8], symbol='o')
 
-timer = QtCore.QTimer()
-timer.timeout.connect(update)
-timer.start(0)
+# Using allowAdd and allowRemove to limit user interaction
+tickViewer = CustomTickSliderItem(allowAdd=False, allowRemove=False)
+vb.sigXRangeChanged.connect(tickViewer.updateRange)
+pw.plotItem.layout.addItem(tickViewer, 4, 1)
 
-framecnt = FrameCounter()
-framecnt.sigFpsUpdate.connect(lambda fps: plot.setTitle(f'{fps:.1f} fps'))
+tickViewer.setTicks( [dates[0], dates[2], dates[-1]] )
+
+pw.show()
+pw.setWindowTitle('pyqtgraph example: customPlot')
+
+r = pg.PolyLineROI([(0,0), (10, 10)])
+pw.addItem(r)
 
 if __name__ == '__main__':
     pg.exec()

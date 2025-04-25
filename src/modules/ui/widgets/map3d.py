@@ -536,8 +536,7 @@ class PositionTracker:
         cache_index = 0
         for item in self._items:
             self._create_if_not_cached(cache_index)
-            item_pos_world = item.get_position()
-            self._update_cached_item_data(cache_index, self._rf_position, item_pos_world)
+            self._update_cached_item_data(cache_index, self._rf_position, item.get_position())
             cache_index += 1
         self._hide_unused_cached_items(cache_index)
 
@@ -606,7 +605,7 @@ class Map3D(GLViewWidget):
             elevation=self.INIT_OPTS["elevation"],
             azimuth=self.INIT_OPTS["azimuth"],
         )
-        self.setFocusPolicy(Qt.StrongFocus)  # Accept (keyboard) events without focus
+        # self.setFocusPolicy(Qt.StrongFocus)  # Accept (keyboard) events without focus
 
         # Items
         self._add_grids()
@@ -615,7 +614,6 @@ class Map3D(GLViewWidget):
         self.car = Car3D(parent_widget=self)
         self.mouse_position_2d_label = PositionLabel2D(parent=self)
         self.navigation_data = NavigationData(parent_widget=self)
-        # self.navigation_data_player = NavigationDataPlayer(self.update_navigation_data)
 
         ref_frames = [self.world_rf, self.car.car_rf, self.car.camera_rf]
         self.rfs = ReferenceFrames(parent=self, ref_frames=ref_frames)
@@ -645,10 +643,6 @@ class Map3D(GLViewWidget):
 
         self.path_planner_position_tracker.update_items(items=items)
         self.rf_position_tracker.update_tracking()
-
-    def update_navigation_data(self, *args, **kwargs):
-        items = self.navigation_data.update(*args, **kwargs)
-        self.path_planner_position_tracker.update_items(items=items)
 
     def update_car_data(self, x, y, heading, steering_angle):
         self.car.update(x, y, heading, steering_angle)
@@ -907,19 +901,14 @@ class Map3DDemo(QMainWindow):
         self.setWindowTitle("3D Visualization Demo")
         self.resize(800, 600)
 
-        # Create central widget with only the 3D map
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # Create 3D map widget (takes full space now)
         self.map_3d = Map3D()
         main_layout.addWidget(self.map_3d)
 
-        # Create floating control panel
         self.control_panel = ControlPanel()
-
-        # Connect controls
         self.control_panel.roll_slider.valueChanged.connect(self._update_orientation)
         self.control_panel.pitch_slider.valueChanged.connect(self._update_orientation)
         self.control_panel.yaw_slider.valueChanged.connect(self._update_orientation)
@@ -932,18 +921,9 @@ class Map3DDemo(QMainWindow):
         self.control_panel.car_heading_slider.valueChanged.connect(self._update_car_position)
         self.control_panel.car_steering_angle_slider.valueChanged.connect(self._update_car_position)
 
-        # Animation timer
-        self.animation_timer = QTimer()
-        self.animation_timer.timeout.connect(self._update_animation)
-        self.animation_angle = 0
-
-        # Add control panel toggle action
         toggle_controls_action = self.menuBar().addAction("Toggle Controls")
         toggle_controls_action.triggered.connect(self._toggle_control_panel)
         toggle_controls_action.setShortcut("Ctrl+C")
-
-        # Initial update
-        # self._update_orientation()
 
     def _toggle_control_panel(self):
         if self.control_panel.isVisible():
@@ -973,44 +953,6 @@ class Map3DDemo(QMainWindow):
         heading = self.control_panel.car_heading_slider.value()
         steering_angle = self.control_panel.car_steering_angle_slider.value()
         self.map_3d.update_car_data(x, y, heading, steering_angle)
-
-    def _toggle_animation(self, checked):
-        """Toggle animation on/off."""
-        if checked:
-            self.control_panel.animate_button.setText("Stop Animation")
-            self.animation_timer.start(30)
-            # Disable sliders during animation
-            self.control_panel.roll_slider.setEnabled(False)
-            self.control_panel.pitch_slider.setEnabled(False)
-            self.control_panel.yaw_slider.setEnabled(False)
-        else:
-            self.control_panel.animate_button.setText("Start Animation")
-            self.animation_timer.stop()
-            # Enable sliders after animation
-            self.control_panel.roll_slider.setEnabled(True)
-            self.control_panel.pitch_slider.setEnabled(True)
-            self.control_panel.yaw_slider.setEnabled(True)
-
-    def _update_animation(self):
-        """Update animation frame."""
-        self.animation_angle += 2
-        if self.animation_angle >= 360:
-            self.animation_angle = 0
-
-        # Create a rotation that changes over time
-        rotation = Vector(
-            45 * np.sin(np.deg2rad(self.animation_angle)),
-            45 * np.sin(np.deg2rad(self.animation_angle + 120)),
-            self.animation_angle,
-        )
-
-        # Update slider positions
-        self.control_panel.roll_slider.setValue(int(rotation.x()))
-        self.control_panel.pitch_slider.setValue(int(rotation.y()))
-        self.control_panel.yaw_slider.setValue(int(rotation.z()))
-
-        # Update the 3D view
-        self.map_3d.update_data(rotation)
 
     def _reset_orientation(self):
         """Reset to default orientation."""

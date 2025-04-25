@@ -49,6 +49,7 @@ class Colors:
     
     GREEN = "#98FB98"
     RED = "#FB9898"
+    BLUE = "#98f9f9"
     ORANGE = "#FFCC99"
     PASTEL_BLUE = "#98f9f9"
     PASTEL_PURPLE = "#DDA0DD"
@@ -112,7 +113,7 @@ class FitGraphicsView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def set_pixmap(self, pixmap):
+    def update(self, pixmap):
         """Set the pixmap and fit it to the view."""
         self.pixmap_item.setPixmap(pixmap)
         # if not pixmap.isNull():

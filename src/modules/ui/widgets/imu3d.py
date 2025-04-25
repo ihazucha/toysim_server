@@ -246,9 +246,9 @@ class IMU3D(GLViewWidget):
             self.gyro_arrows.append(arrow)
             self.addItem(arrow)
 
-    def update_data(self, quaternion: QQuaternion, accel: Vector, gyro: Vector):
+    def update_data(self, rotation_quaternion: QQuaternion, accel: tuple, gyro: tuple):
         tr = Transform3D()
-        tr.rotate(quaternion)
+        tr.rotate(rotation_quaternion)
         self.imu_rf.setTransform(tr)
 
         for i in range(len(self.world_rf.xyz_lines)):

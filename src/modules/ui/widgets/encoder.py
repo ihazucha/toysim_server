@@ -3,10 +3,11 @@ from typing import Iterable
 
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, TextItem, mkPen, mkBrush
 
+from modules.ui.data import EncoderPlotData
 from modules.ui.presets import Colors, TooltipLabel, FrameCounter
 from modules.ui.plots import (
     DATA_QUEUE_SIZE,
@@ -21,25 +22,18 @@ class EncoderWidget(QWidget):
     def __init__(self, name: str):
         super().__init__()
         self.radial_plot_widget = EncoderRadialPlotWidget(name=name)
-        self.line_plot_widget = EncoderLinePlotWidget(name=name)
         self.stats_widget = EncoderPlotStatsWidget()
 
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # plot_layout = QHBoxLayout()
-        # plot_layout.addWidget(self.line_plot_widget, stretch=2)
-        # plot_layout.addWidget(self.radial_plot_widget, stretch=1)
-
         layout.addWidget(self.radial_plot_widget, stretch=1)
-        # layout.addLayout(plot_layout, stretch=1)
         layout.addWidget(self.stats_widget)
 
-    def update(self, readings: Iterable):
-        self.radial_plot_widget.update(readings)
-        # self.line_plot_widget.update(readings)
-
+    def update(self, data: EncoderPlotData):
+        self.radial_plot_widget.update(data.radial_xs, data.radial_ys)
+        self.stats_widget.update(data.angle_deg, data.angle_deg_change, data.avg_magnitude, data.avg_magnitude_change)
 
 class EncoderPlotStatsWidget(PlotStatsWidget):
     def __init__(self):
@@ -96,50 +90,14 @@ class EncoderLinePlotWidget(PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setTitle(f"Angle [°] | Magnitude ({self.name})")
 
-        self._angle_data_encoder_freq = np.zeros(DATA_QUEUE_SIZE)
-        self._angle_data_fusion_freq = np.zeros(DATA_QUEUE_SIZE)
-        self._magnitude_data_encoder_freq = np.zeros(DATA_QUEUE_SIZE)
-        self._magnitude_data_fusion_freq = np.zeros(DATA_QUEUE_SIZE)
-        self._x = np.array(PLOT_TIME_STEPS)
-
-        self._last_angle_deg = 0
-        self._last_magnitude = 0
-
         self._angle_color = Colors.GREEN
 
         self._setup_axes()
         self._setup_legend()
         self._setup_plots()
 
-    def update(self, readings: Iterable):
-        if not readings:
-            return
-
-        # TODO: convert RAW2DEG on client's side
-        angle_deg_changes = []
-        magnitude_changes = []
-
-        for data in readings:
-            angle_deg = data.position * ENCODER_RAW2DEG
-            angle_deg_change = (angle_deg - self._last_angle_deg + 180) % 360 - 180
-            angle_deg_changes.append(abs(angle_deg_change))
-            self._last_angle_deg = angle_deg
-
-            magnitude_change = data.magnitude - self._last_magnitude
-            magnitude_changes.append(magnitude_change)
-            self._last_magnitude = data.magnitude
-
-            self._angle_data_encoder_freq = np.roll(self._angle_data_encoder_freq, -1)
-            self._angle_data_encoder_freq[-1] = angle_deg
-            self._magnitude_data_encoder_freq = np.roll(self._magnitude_data_encoder_freq, -1)
-            self._magnitude_data_encoder_freq[-1] = data.magnitude
-
-        self._angle_data_fusion_freq = np.roll(self._angle_data_fusion_freq, -1)
-        self._angle_data_fusion_freq[-1] = self._last_angle_deg
-        self._magnitude_data_fusion_freq = np.roll(self._magnitude_data_fusion_freq, -1)
-        self._magnitude_data_fusion_freq[-1] = self._last_magnitude
-
-        self._angle_plot.setData(self._x, np.cos(np.deg2rad(self._angle_data_encoder_freq)))
+    def update(self, radial_xs: np.ndarray):
+        self._angle_plot.setData(self._x, radial_xs)
 
     def _setup_axes(self):
         self.setYRange(1.5, -1.5, padding=0)
@@ -152,17 +110,13 @@ class EncoderLinePlotWidget(PlotWidget):
         self.getAxis("bottom").setPen(self.text_pen)
         self.getAxis("bottom").setTextPen(self.text_pen)
 
-        # self.showAxis("right")
-        # self.getAxis("right").setPen(self.text_pen)
-        # self.getAxis("right").setTextPen(self.text_pen)
-
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
         self.legend.anchor(itemPos=(0, 0), parentPos=(0, 1), offset=(15, -35))
         self.legend.setBrush(QBrush(QColor(Colors.ACCENT)))
         self.legend.setPen(mkPen(color=Colors.ON_FOREGROUND, width=0.5))
         self.legend.layout.setContentsMargins(3, 1, 3, 1)
-        # self.legend.setColumnCount(3)
+        self.legend.setColumnCount(3)
 
     def _setup_plots(self):
         angle_pen = mkPen(self._angle_color, style=Qt.PenStyle.SolidLine, width=2)
@@ -180,81 +134,26 @@ class EncoderRadialPlotWidget(PlotWidget):
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setTitle(f"Angle [°] | Magnitude ({self.name})")
 
-        self.max_samples_fusion_freq = 15
-        self.xs_fusion_freq = np.zeros(self.max_samples_fusion_freq)
-        self.ys_fusion_freq = np.zeros(self.max_samples_fusion_freq)
-
-        self.last_angle_deg = 0
-        self.last_magnitude = 0
-
         self._setup_axes()
         self._setup_reference_circle()
-        self._setup_history_samples_color_brushes()
         self._setup_plots()
+        # self._setup_history_samples_color_brushes()
 
-        self.frame_counter = FrameCounter()
-        self.frame_counter.sigFpsUpdate.connect(lambda fps: self.setTitle(f"{fps:.1f}"))
-
-    def update(self, readings: Iterable):
-        if not readings:
-            return
-
-        # TODO: convert RAW2DEG on client's side
-        # TODO: aggregate on client's side
-
-        # angle_deg_changes = []
-        # magnitude_changes = []
-        # magnitude_sum = 0
-
-        # for data in readings:
-        #     angle_deg = data.position * ENCODER_RAW2DEG
-        #     angle_deg_change = (angle_deg - self.last_angle_deg + 180) % 360 - 180
-        #     angle_deg_changes.append(abs(angle_deg_change))
-        #     self.last_angle_deg = angle_deg
-
-        #     magnitude_change = data.magnitude - self.last_magnitude
-        #     magnitude_changes.append(magnitude_change)
-        #     magnitude_sum += data.magnitude
-        #     self.last_magnitude = data.magnitude
-
-        # angle = np.deg2rad(self.last_angle_deg)
-        # self.xs_fusion_freq = np.roll(self.xs_fusion_freq, -1)
-        # self.ys_fusion_freq = np.roll(self.ys_fusion_freq, -1)
-        # self.xs_fusion_freq[-1] = self.last_magnitude * np.cos(angle)
-        # self.ys_fusion_freq[-1] = self.last_magnitude * np.sin(angle)
-
-        # angle_deg_change = sum(angle_deg_changes)
-        # avg_magnitude = magnitude_sum / len(readings)
-        # avg_magnitude_change = sum(magnitude_changes) / len(magnitude_changes)
-
-        # Update plots
-        # self.current_point.setData([self.xs_fusion_freq[-1]], [self.ys_fusion_freq[-1]])
-        # self.points_fusion_freq.setData(x=self.xs_fusion_freq, y=self.ys_fusion_freq, brush=self.color_brushes_fusion_freq)
-        # self.points_fusion_freq.setData(x=self.xs_fusion_freq, y=self.ys_fusion_freq, brush=self.color_brushes_fusion_freq)
-
-        # Update stats
-        # self.parent().stats_widget.update(
-        #     self.last_angle_deg, angle_deg_change, avg_magnitude, avg_magnitude_change
-        # )
-        # self.frame_counter.update()
+    def update(self, radial_xs: np.ndarray, radial_ys: np.ndarray):
+        self.current_point.setData([radial_xs[-1]], [radial_ys[-1]])
+        self.points_fusion_freq.setData(x=radial_xs, y=radial_ys)
 
     def _setup_axes(self):
         self.setYRange(-50, 50, padding=0)
         self.setXRange(-50, 50, padding=0)
 
-
         self.text_pen = mkPen(Colors.ON_ACCENT)
 
         self.getAxis("left").setPen(self.text_pen)
         self.getAxis("left").setTextPen(self.text_pen)
-        # self.hideAxis("left")
 
         self.getAxis("bottom").setPen(self.text_pen)
         self.getAxis("bottom").setTextPen(self.text_pen)
-
-        # self.getAxis("right").setPen(self.text_pen)
-        # self.getAxis("right").setTextPen(self.text_pen)
-        # self.showAxis("right")
 
     def _setup_reference_circle(self):
         # Radial grid circle

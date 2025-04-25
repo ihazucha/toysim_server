@@ -1,6 +1,7 @@
 import sys
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QPixmap, QIcon, QQuaternion
+from PySide6.QtGui import QPixmap, QIcon
+from PySide6 import QtGui
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -23,7 +24,7 @@ from modules.ui.widgets.encoder import EncoderWidget
 from modules.ui.presets import Colors
 from modules.ui.widgets.map3d import Map3D
 from modules.ui.widgets.imu3d import IMU3D
-from modules.ui.widgets.imu import GyroWidget
+from modules.ui.widgets.imu import IMURawWidget
 
 from modules.messaging import messaging
 from utils.paths import icon_path
@@ -32,20 +33,16 @@ from modules.ui.sidebar import RecordsSidebar
 from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
-from modules.ui.data import SimDataThread, VehicleDataThread, QSimData, QRealData
+from modules.ui.data import SimDataThread, RealDataThread, QSimData, QRealData
 from modules.ui.presets import Fonts, FitGraphicsView, APP_STYLE
 from modules.ui.settings import WindowSettings
 
 import time
 
-import pyqtgraph as pg
-
-try:
-    import OpenGL
-    pg.setConfigOption('useOpenGL', True)
-    pg.setConfigOption('enableExperimental', True)
-except Exception as e:
-    print(f"Enabling OpenGL failed with {e}. Will result in slow rendering. Try installing PyOpenGL.")
+# Disable VSYNC (significant FPS boost)
+sfmt = QtGui.QSurfaceFormat()
+sfmt.setSwapInterval(0)
+QtGui.QSurfaceFormat.setDefaultFormat(sfmt)
 
 # Utils
 # -------------------------------------------------------------------------------------------------
@@ -216,10 +213,10 @@ class RendererMainWindow(QMainWindow):
 
         # IMU
         self.imu3d_plot = IMU3D()
-        self.imu_gyro_plot = GyroWidget()
-        self.imu_accel_plot = GyroWidget()
-        self.imu_mag_plot = GyroWidget()
-        self.imu_rotation_plot = GyroWidget()
+        self.imu_accel_plot = IMURawWidget(title="Acceleration [m/s^2]")
+        self.imu_gyro_plot = IMURawWidget(title="Angular Velocity [rad/s]")
+        self.imu_mag_plot = IMURawWidget(title="Magnetic Intensity [uT]")
+        self.imu_rotation_plot = IMURawWidget(title="Euler Angles [°]")
 
         imu_rotation_layout = QVBoxLayout()
         imu_rotation_layout.addWidget(self.imu3d_plot, stretch=1)
@@ -304,10 +301,10 @@ class RendererMainWindow(QMainWindow):
 
     def update_simulation_data(self, data: QSimData):
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
-        self.rgb_graphics_view.set_pixmap(rgb_pixmap)
+        self.rgb_graphics_view.update(rgb_pixmap)
 
         depth_pixmap = QPixmap.fromImage(data.depth_qimage)
-        self.depth_graphics_view.set_pixmap(depth_pixmap)
+        self.depth_graphics_view.update(depth_pixmap)
 
         period_ms = data.processor_period_ns / 1e6
         self.processor_period_plot.update(dt_ms=period_ms)
@@ -334,18 +331,10 @@ class RendererMainWindow(QMainWindow):
             steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
         )
 
+
     def update_real_data(self, data: QRealData):
         # App Window
-        # ----------
         self.data_latency_label.update()
-
-        # Dashboard
-        # ----------
-        rgb_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
-        self.rgb_graphics_view.set_pixmap(rgb_pixmap)
-
-        rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
-        self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
 
         self.map3d_plot.update_data(
             car_x=0,
@@ -355,35 +344,12 @@ class RendererMainWindow(QMainWindow):
             roadmarks=data.raw.roadmarks_data.roadmarks,
             path=data.raw.roadmarks_data.path,
         )
-        self.long_control_widget.update(
-            measured_speed=data.raw.original.sensor_fusion.avg_speed,
-            target_speed=data.raw.original.control.speed,
-            engine_power_percent=data.raw.original.actuators.motor_power * 100,
-        )
-        self.lat_control_widget.update(
-            estimated=data.raw.control_data.steering_angle / 3,
-            target=data.raw.control_data.steering_angle / 2,
-            input=data.raw.control_data.steering_angle,
-        )
 
-        # Sensors
-        # ----------
-        # encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
-        # self.left_encoder_plot.update(encoder_data_samples)
-        # self.right_encoder_plot.update(encoder_data_samples)
-
-        imu_data = data.raw.original.sensor_fusion.imu
-        if len(imu_data):
-            last_imu_data = imu_data[-1]
-            for data in imu_data:
-                self.imu3d_plot.update_data(
-                    quaternion=QQuaternion(*data.rotation_quaternion),
-                    accel=data.accel_linear,
-                    gyro=data.gyro,
-                )
-            self.imu_accel_plot.update(last_imu_data.accel_linear)
-            self.imu_gyro_plot.update(last_imu_data.gyro)
-            self.imu_mag_plot.update(last_imu_data.mag)
+        self.imu3d_plot.update_data(
+            rotation_quaternion=data.imu_plot.rotation_quaternion,
+            accel=data.imu_plot.accel_linear_avg,
+            gyro=data.imu_plot.gyro_avg
+        )
 
 
 class Renderer:
@@ -394,23 +360,34 @@ class Renderer:
         
         self.window = RendererMainWindow()
 
-        t_sim_data = SimDataThread()
-        t_sim_data.data_ready.connect(self.window.update_simulation_data)
-        # window.init_complete.connect(t_sim_data.start)
-
-        t_vehicle_data = VehicleDataThread()
-        t_vehicle_data.data_ready.connect(self.window.update_real_data)
-        self.window.init_complete.connect(t_vehicle_data.start)
-
         t_recorder = RecorderThread(data_queue=messaging.q_processing)
         self.window.init_complete.connect(t_recorder.start)
 
         t_playback = PlaybackThread(data_queue=messaging)
         self.window.init_complete.connect(t_playback.start)
 
-        threads = [t_sim_data, t_vehicle_data, t_recorder, t_playback]
+        t_sim_data = SimDataThread()
+        t_sim_data.data_ready.connect(self.window.update_simulation_data)
+        # window.init_complete.connect(t_sim_data.start)
 
+        t_vehicle_data = RealDataThread()
+        self.window.init_complete.connect(t_vehicle_data.start)
+      
+        threads = [t_sim_data, t_vehicle_data, t_recorder, t_playback]
         self.window.init()
+      
+        t_vehicle_data.long_control_plot_data_ready.connect(self.window.long_control_widget.update)
+        t_vehicle_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
+        t_vehicle_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
+        t_vehicle_data.camera_rgb_updated_pixmap_ready.connect(self.window.depth_graphics_view.update)
+        t_vehicle_data.lr_encoder_plot_data_ready.connect(self.window.left_encoder_plot.update)
+        t_vehicle_data.rr_encoder_plot_data_ready.connect(self.window.right_encoder_plot.update)
+        t_vehicle_data.imu_accel_plot_data_ready.connect(self.window.imu_accel_plot.update)
+        t_vehicle_data.imu_gyro_plot_data_ready.connect(self.window.imu_gyro_plot.update)
+        t_vehicle_data.imu_mag_plot_data_ready.connect(self.window.imu_mag_plot.update)
+        t_vehicle_data.imu_rotation_plot_data_ready.connect(self.window.imu_rotation_plot.update)
+        t_vehicle_data.data_ready.connect(self.window.update_real_data)
+
         self.window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
         self.window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
         self.window.records_sidebar.record_selected.connect(t_playback.set_current_record)

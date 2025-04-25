@@ -4,87 +4,83 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 
-from pyqtgraph import PlotWidget, mkPen
+from pyqtgraph import PlotWidget, PlotCurveItem, mkPen
 
-from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
+from modules.ui.plots import PlotStatsWidget, STEP_TICKS, PLOT_TIME_STEPS
 from modules.ui.presets import Colors, TooltipLabel
 
 
-class GyroWidget(QWidget):
-    def __init__(self):
+class IMURawWidget(QWidget):
+    def __init__(self, title: str, axis_names=("X", "Y", "Z"), axis_tooltips=("", "", "")):
         super().__init__()
-        self.plot_widget = GyroPlotWidget()
-        self.stats_widget = GyroPlotStatsWidget()
-  
+        self.plot_widget = IMURawPlotWidget(title)
+        # self.stats_widget = IMURawStatsWidget(axis_names, axis_tooltips)
+
         layout = QVBoxLayout(self)
         layout.setSpacing(0)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.plot_widget, stretch=1)
-        layout.addWidget(self.stats_widget)
+        # layout.addWidget(self.stats_widget)
 
-    def update(self, gyro: Tuple[float, float, float]):
-        self.plot_widget.update(gyro)
-        self.stats_widget.update(gyro)
+    def update(self, xyz: Tuple[float, float, float]):
+        self.plot_widget.update(xyz)
+        # self.stats_widget.update(xyz[-1])
 
 
-class GyroPlotStatsWidget(PlotStatsWidget):
-    def __init__(self):
+class IMURawStatsWidget(PlotStatsWidget):
+    def __init__(self, axis_names=("X", "Y", "Z"), axis_tooltips=("", "", "")):
         super().__init__()
 
-        html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
+        html_value = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
 
-        self.texts = {
-            "x": f"X: {html_colored_number.format(Colors.RED)}",
-            "y": f"Y: {html_colored_number.format(Colors.GREEN)}",
-            "z": f"Z: {html_colored_number.format(Colors.PASTEL_BLUE)}",
-        }
+        self._axes = (
+            dict(
+                id="x",
+                fstr=f"{axis_names[0]}: {html_value.format(Colors.RED)}",
+                label=None,
+            ),
+            dict(
+                id="y",
+                fstr=f"{axis_names[1]}: {html_value.format(Colors.GREEN)}",
+                label=None,
+            ),
+            dict(
+                id="z",
+                fstr=f"{axis_names[2]}: {html_value.format(Colors.BLUE)}",
+                label=None,
+            ),
+        )
 
-        self.x_label = TooltipLabel(
-            text=self.texts["x"].format("--"),
-            tooltip="Roll angular velocity",
-        )
-        self.y_label = TooltipLabel(
-            text=self.texts["y"].format("--"),
-            tooltip="Pitch angular velocity",
-        )
-        self.z_label = TooltipLabel(
-            text=self.texts["z"].format("--"),
-            tooltip="Yaw angular velocity",
-        )
+        for i, a in enumerate(self._axes):
+            a["label"] = TooltipLabel(text=a["fstr"].format("--"), tooltip=axis_tooltips[i])
+            self.layout.addWidget(a["label"])
 
-        self.layout.addWidget(self.x_label)
-        self.layout.addWidget(self.y_label)
-        self.layout.addWidget(self.z_label)
         self.layout.addStretch(1)
-
+ 
     def update(self, gyro: Tuple[float, float, float]):
-        x_str = "{:6.2f}".format(gyro[0]).replace(" ", "&nbsp;")
-        y_str = "{:6.2f}".format(gyro[1]).replace(" ", "&nbsp;")
-        z_str = "{:6.2f}".format(gyro[2]).replace(" ", "&nbsp;")
-
-        self.x_label.setText(self.texts["x"].format(x_str))
-        self.y_label.setText(self.texts["y"].format(y_str))
-        self.z_label.setText(self.texts["z"].format(z_str))
+        for i, a in enumerate(self._axes):
+            str = "{:6.2f}".format(gyro[i]).replace(" ", "&nbsp;")
+            a["label"].setText(a["fstr"].format(str))
 
 
-class GyroPlotWidget(PlotWidget):
-    def __init__(self):
+class IMURawPlotWidget(PlotWidget):
+    def __init__(self, title, axis_names=("x", "y", "z")):
         super().__init__()
         self.setBackground(Colors.FOREGROUND)
-        self.getPlotItem().setTitle("Gyroscope Angular Velocity [°/s]")
+        self.getPlotItem().setTitle(title)
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
+        self._axes = (
+            dict(id="x", name=axis_names[0], color=Colors.RED, curve=None),
+            dict(id="y", name=axis_names[1], color=Colors.GREEN, curve=None),
+            dict(id="z", name=axis_names[2], color=Colors.BLUE, curve=None),
+        )
 
-        self._x_data = np.zeros(DATA_QUEUE_SIZE)
-        self._y_data = np.zeros(DATA_QUEUE_SIZE)
-        self._z_data = np.zeros(DATA_QUEUE_SIZE)
         self._n_steps = np.array(PLOT_TIME_STEPS)
 
-        self._x_color = Colors.RED
-        self._y_color = Colors.GREEN
-        self._z_color = Colors.PASTEL_BLUE
-
-        self._update_counter = 0
-        self._update_frequency = 1
+        self._rescale_frequency = 15
+        self._rescale_counter = 0
+        self._rescale_min_range = 2.0
+        self._rescale_y_padding = 0.5
 
         self._setup_axes()
         self._setup_legend()
@@ -93,25 +89,14 @@ class GyroPlotWidget(PlotWidget):
     def _setup_axes(self):
         self.setYRange(-2.0, 2.0, padding=0)
 
-        # def format_ticks_align_left(values, scale, spacing):
-        #     return [f"{v:<4.0f}" for v in values]
+        pen = mkPen(Colors.ON_ACCENT)
 
-        # def format_ticks_align_right(values, scale, spacing):
-        #     return [f"{v:4.0f}" for v in values]
-
-        self.text_pen = mkPen(Colors.ON_ACCENT)
-        self.getAxis("left").setPen(self.text_pen)
-        self.getAxis("left").setTextPen(self.text_pen)
-        # self.getAxis("left").tickStrings = format_ticks_align_right
+        self.getAxis("left").setPen(pen)
+        self.getAxis("left").setTextPen(pen)
 
         self.getAxis("bottom").setTicks(STEP_TICKS)
-        self.getAxis("bottom").setPen(self.text_pen)
-        self.getAxis("bottom").setTextPen(self.text_pen)
-
-        # self.showAxis("right")
-        # self.getAxis("right").setPen(self.text_pen)
-        # self.getAxis("right").setTextPen(self.text_pen)
-        # self.getAxis("right").tickStrings = format_ticks_align_left
+        self.getAxis("bottom").setPen(pen)
+        self.getAxis("bottom").setTextPen(pen)
 
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
@@ -122,32 +107,38 @@ class GyroPlotWidget(PlotWidget):
         self.legend.setColumnCount(3)
 
     def _setup_plots(self):
-        x_pen = mkPen(self._x_color, style=Qt.PenStyle.SolidLine, width=1)
-        self._x_plot = self.plot(name="X", pen=x_pen, antialias=True, skipFiniteCheck=True)
-        self._x_plot.setData(self._n_steps, self._z_data)
+        for ad in self._axes:
+            pen = mkPen(ad["color"], style=Qt.PenStyle.SolidLine, width=1)
+            ad["curve"] = PlotCurveItem(name=ad["name"], pen=pen, antialias=True, skipFiniteCheck=True)
+            self.addItem(ad["curve"])
+            # self.legend.addItem(ad["curve"], name=ad["name"])
 
-        y_pen = mkPen(self._y_color, style=Qt.PenStyle.SolidLine, width=1)
-        self._y_plot = self.plot(name="Y", pen=y_pen, antialias=True, skipFiniteCheck=True)
-        self._y_plot.setData(self._n_steps, self._x_data)
+    def update(self, axes_data: np.ndarray):
+        for i in range(len(self._axes)):
+            self._axes[i]["curve"].setData(self._n_steps, axes_data[:, i])
 
-        z_pen = mkPen(self._z_color, style=Qt.PenStyle.SolidLine, width=1)
-        self._z_plot = self.plot(name="Z", pen=z_pen, antialias=True, skipFiniteCheck=True)
-        self._z_plot.setData(self._n_steps, self._y_data)
+        # if self._rescale_counter == 0:
+            # self._update_y_scale()
+        # self._rescale_counter = (self._rescale_counter + 1) % self._rescale_frequency
 
 
-    def update(self, gyro: Tuple[float, float, float]):
-        self._x_data = np.roll(self._x_data, -1)
-        self._x_data[-1] = gyro[0]
 
-        self._z_data = np.roll(self._z_data, -1)
-        self._z_data[-1] = gyro[1]
+    def _update_y_scale(self):
+        data_min = np.min(self._target_speed_data)
+        data_max = np.max(self._target_speed_data)
 
-        self._y_data = np.roll(self._y_data, -1)
-        self._y_data[-1] = gyro[2]
+        range_min = data_min - self._rescale_y_padding
+        range_max = data_max + self._rescale_y_padding
 
-        if self._update_counter == 0:
-            self._y_plot.setData(self._n_steps, self._x_data)
-            self._x_plot.setData(self._n_steps, self._z_data)
-            self._z_plot.setData(self._n_steps, self._y_data)
+        if range_max - range_min < self._rescale_min_range:
+            mid = (range_max + range_min) / 2
+            range_min = mid - self._rescale_min_range / 2
+            range_max = mid + self._rescale_min_range / 2
 
-        self._update_counter = (self._update_counter + 1) % self._update_frequency
+        # Only update if change diff > 20%
+        current_min, current_max = self.getViewBox().viewRange()[1]
+        min_changed = abs(current_min - range_min) > abs(current_min * 0.2)
+        max_changed = abs(current_max - range_max) > abs(current_max * 0.2)
+
+        if min_changed or max_changed:
+            self.setYRange(range_min, range_max, padding=0)

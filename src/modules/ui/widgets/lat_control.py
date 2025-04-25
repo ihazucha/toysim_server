@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Iterable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
@@ -6,6 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 from pyqtgraph import PlotWidget, mkPen
 
+from modules.ui.data import LatControlPlotData
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
 from modules.ui.presets import Colors, TooltipLabel, PlotWidgetHorizontalCursor
 
@@ -22,9 +24,9 @@ class LateralControlWidget(QWidget):
         layout.addWidget(self.plot_widget, stretch=1)
         layout.addWidget(self.stats_widget)
 
-    def update(self, estimated: float, target: float, input: float):
-        self.plot_widget.update(estimated, target, input)
-        self.stats_widget.update(estimated, target, input)
+    def update(self, data: LatControlPlotData):
+        self.plot_widget.update(data.estimated_sa, data.target_sa, data.input_sa)
+        self.stats_widget.update(data.estimated_sa[-1], data.target_sa[-1], data.input_sa[-1])
 
 
 class SteeringPlotStatsWidget(PlotStatsWidget):
@@ -98,9 +100,6 @@ class SteeringPlotWidget(PlotWidget):
         self._target_color = Colors.PASTEL_BLUE
         self._input_color = Colors.ORANGE
 
-        self._update_counter = 0
-        self._update_frequency = 1
-
         self._setup_axes()
         self._setup_legend()
         self._setup_plots()
@@ -108,6 +107,15 @@ class SteeringPlotWidget(PlotWidget):
         self.cursor = PlotWidgetHorizontalCursor(
             self, x_values=self._x, update_values_at_index_callback=self._update_values_at_index
         )
+
+    def update(self, estimated: Iterable, target: Iterable, input: Iterable):
+        self._estimated_sa_data = estimated
+        self._target_sa_data = target
+        self._input_sa_data = input
+
+        self._target_sa_plot.setData(self._x, self._target_sa_data)
+        self._estimated_sa_plot.setData(self._x, self._estimated_sa_data)
+        self._input_sa_plot.setData(self._x, self._input_sa_data)
 
     def _setup_axes(self):
         self.setYRange(-35.0, 35.0, padding=0)
@@ -166,22 +174,3 @@ class SteeringPlotWidget(PlotWidget):
         target = self._target_sa_data[idx]
         input_val = self._input_sa_data[idx]
         parent.stats_widget.update(estimated=estimated, target=target, input=input_val)
-
-    def update(self, estimated: float, target: float, input: float | None = None):
-        self._target_sa_data = np.roll(self._target_sa_data, -1)
-        self._target_sa_data[-1] = target
-
-        self._estimated_sa_data = np.roll(self._estimated_sa_data, -1)
-        self._estimated_sa_data[-1] = estimated
-
-        if input is not None:
-            self._input_sa_data = np.roll(self._input_sa_data, -1)
-            self._input_sa_data[-1] = input
-
-        if self._update_counter == 0:
-            self._target_sa_plot.setData(self._x, self._target_sa_data)
-            self._estimated_sa_plot.setData(self._x, self._estimated_sa_data)
-            self._input_sa_plot.setData(self._x, self._input_sa_data)
-
-        self._update_counter = (self._update_counter + 1) % self._update_frequency
-

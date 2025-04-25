@@ -1,13 +1,14 @@
+from typing import Iterable
 import numpy as np
-from collections import deque
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
-from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen
+from pyqtgraph import PlotWidget, PlotCurveItem, mkPen
 import pyqtgraph as pg
 
+from modules.ui.data import LongControlPlotData
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
 from modules.ui.presets import Colors, TooltipLabel
 
@@ -24,9 +25,11 @@ class LongitudinalControlWidget(QWidget):
         layout.addWidget(self.plot_widget, stretch=1)
         layout.addWidget(self.stats_widget)
 
-    def update(self, measured_speed: float, target_speed: float, engine_power_percent: float):
-        self.plot_widget.update(measured_speed, target_speed, engine_power_percent)
-        self.stats_widget.update(measured_speed, target_speed, engine_power_percent)
+    def update(self, data: LongControlPlotData):
+        self.plot_widget.update(data.measured_speed, data.target_speed, data.engine_power_percent)
+        self.stats_widget.update(
+            data.measured_speed[-1], data.target_speed[-1], data.engine_power_percent[-1]
+        )
 
 
 class SpeedPlotStatsWidget(PlotStatsWidget):
@@ -44,20 +47,18 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
 
         speed_header_label = TooltipLabel("<span style='font-weight: bold;'>Speed</span>")
         self.speed_label = TooltipLabel(
-            text=self.texts["measured_speed"].format('--'),
-            tooltip="Measured (Estimated) speed"
+            text=self.texts["measured_speed"].format("--"), tooltip="Measured (Estimated) speed"
         )
         self.target_label = TooltipLabel(
-            text=self.texts["target_speed"].format('--'),
-            tooltip="Target speed as set by the controller"
+            text=self.texts["target_speed"].format("--"),
+            tooltip="Target speed as set by the controller",
         )
         self.error_label = TooltipLabel(
-            text=self.texts["error_speed"].format('--'),
-            tooltip="Target - Measured speed difference"
+            text=self.texts["error_speed"].format("--"),
+            tooltip="Target - Measured speed difference",
         )
         self.power_label = TooltipLabel(
-            text=self.texts["power"].format('--'),
-            tooltip="Engine power as % of max. power"
+            text=self.texts["power"].format("--"), tooltip="Engine power as % of max. power"
         )
 
         self.layout.addWidget(speed_header_label)
@@ -82,26 +83,23 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
 class SpeedPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
-        
+
         self.setBackground(Colors.FOREGROUND)
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
         self.getPlotItem().setTitle("Speed [m/s] | Power [%]")
-        
+
         self.speed_color = Colors.GREEN
         self.power_color = Colors.ORANGE
         self.text_pen = mkPen(Colors.ON_ACCENT)
-        
-        self._speed_data = np.zeros(DATA_QUEUE_SIZE)
-        self._target_data = np.zeros(DATA_QUEUE_SIZE)
+
+        self._measured_speed_data = np.zeros(DATA_QUEUE_SIZE)
+        self._target_speed_data = np.zeros(DATA_QUEUE_SIZE)
         self._power_data = np.zeros(DATA_QUEUE_SIZE)
         self._x_data = np.array(PLOT_TIME_STEPS)
-        
-        self._update_counter= 0
-        self._update_frequency = 1
 
         # Y-axis rescaling
         self._rescale_counter = 0
-        self._rescale_frequency = 10
+        self._rescale_frequency = 15
         self._rescale_min_range = 2.0
         self._rescale_y_padding = 0.5
 
@@ -109,32 +107,34 @@ class SpeedPlotWidget(PlotWidget):
         self._setup_legend()
         self._setup_plots()
 
-
     def _setup_axes(self):
         self.setAutoVisible(y=False)
-        self.setYRange(-self._rescale_min_range/2, self._rescale_min_range/2, padding=self._rescale_y_padding)
- 
+        self.setYRange(
+            -self._rescale_min_range / 2,
+            self._rescale_min_range / 2,
+            padding=self._rescale_y_padding,
+        )
+
         self.getAxis("left").setPen(self.text_pen)
         self.getAxis("left").setTextPen(self.text_pen)
-        
+
         self.getAxis("bottom").setTicks(STEP_TICKS)
         self.getAxis("bottom").setPen(self.text_pen)
         self.getAxis("bottom").setTextPen(self.text_pen)
-        
+
         self.power_y_axis = pg.AxisItem("right")
         self.power_y_axis.setPen(self.text_pen)
         self.power_y_axis.setTextPen(self.text_pen)
         self.getPlotItem().layout.addItem(self.power_y_axis, 2, 3)
-        
+
         self._power_viewbox = pg.ViewBox()
         self.power_y_axis.linkToView(self._power_viewbox)
         self._power_viewbox.setXLink(self.getPlotItem())
         self._power_viewbox.setYRange(-100, 100, padding=0)
         self.getPlotItem().scene().addItem(self._power_viewbox)
-        
+
         # Connect power and speed viewboxes
         self.getPlotItem().vb.sigResized.connect(self._update_views)
-        
 
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
@@ -147,59 +147,50 @@ class SpeedPlotWidget(PlotWidget):
     def _setup_plots(self):
         speed_pen = mkPen(self.speed_color, style=Qt.PenStyle.SolidLine, width=1)
         self._measured_speed_plot = self.plot(name="Measured", pen=speed_pen, antialias=True)
-        self._measured_speed_plot.setData(self._x_data, self._speed_data)
-        
+        self._measured_speed_plot.setData(self._x_data, self._measured_speed_data)
+
         target_pen = mkPen(self.speed_color, style=Qt.PenStyle.DashLine, width=1)
         self._target_speed_plot = self.plot(name="Target", pen=target_pen, antialias=True)
-        self._target_speed_plot.setData(self._x_data, self._target_data)
-        
+        self._target_speed_plot.setData(self._x_data, self._target_speed_data)
+
         power_pen = mkPen(self.power_color, style=Qt.PenStyle.SolidLine, width=1)
         self._power_plot = pg.PlotCurveItem(name="Power", pen=power_pen, antialias=True)
         self._power_plot.setData(self._x_data, self._power_data)
         self._power_viewbox.addItem(self._power_plot)
         self.legend.addItem(PlotCurveItem(pen=power_pen), "Power")
-        
+
     def _update_views(self):
         """Keeps power and main viewboxes synced on resize"""
         self._power_viewbox.setGeometry(self.getPlotItem().vb.sceneBoundingRect())
 
-    def update(self, measured_speed: float, target_speed: float, engine_power_percent: float):
-        self._speed_data = np.roll(self._speed_data, -1)
-        self._target_data = np.roll(self._target_data, -1)
-        self._power_data = np.roll(self._power_data, -1)
-        
-        self._speed_data[-1] = measured_speed
-        self._target_data[-1] = target_speed
-        self._power_data[-1] = engine_power_percent
-        
-        if self._update_counter == 0:
-            self._measured_speed_plot.setData(self._x_data, self._speed_data)
-            self._target_speed_plot.setData(self._x_data, self._target_data)
-            self._power_plot.setData(self._x_data, self._power_data)
-            
-            if self._rescale_counter == 0:
-                self._update_y_scale()
-                self._rescale_counter = (self._rescale_counter + 1) % self._rescale_frequency
-            
-        self._update_counter = (self._update_counter + 1) % self._update_frequency
+    def update(
+        self, measured_speed: Iterable, target_speed: Iterable, engine_power_percent: Iterable
+    ):
+        self._measured_speed_plot.setData(self._x_data, measured_speed)
+        self._target_speed_plot.setData(self._x_data, target_speed)
+        self._power_plot.setData(self._x_data, engine_power_percent)
 
-    
+        # TODO: does not work but keep it this way until data refactor is resolved
+        if self._rescale_counter == 0:
+            self._update_y_scale()
+        self._rescale_counter = (self._rescale_counter + 1) % self._rescale_frequency
+
     def _update_y_scale(self):
-        data_min = np.min(self._target_data)
-        data_max = np.max(self._target_data)
-        
+        data_min = np.min(self._target_speed_data)
+        data_max = np.max(self._target_speed_data)
+
         range_min = data_min - self._rescale_y_padding
         range_max = data_max + self._rescale_y_padding
-        
+
         if range_max - range_min < self._rescale_min_range:
             mid = (range_max + range_min) / 2
             range_min = mid - self._rescale_min_range / 2
             range_max = mid + self._rescale_min_range / 2
-        
+
         # Only update if change diff > 20%
         current_min, current_max = self.getViewBox().viewRange()[1]
         min_changed = abs(current_min - range_min) > abs(current_min * 0.2)
         max_changed = abs(current_max - range_max) > abs(current_max * 0.2)
-        
+
         if min_changed or max_changed:
             self.setYRange(range_min, range_max, padding=0)
