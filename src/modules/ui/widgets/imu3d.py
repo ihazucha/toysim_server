@@ -167,8 +167,8 @@ class ArcItem:
 
 class IMU3D(GLViewWidget):
     INIT_OPTS = {
-        "center": Vector(0, 0, 0),
-        "distance": 2.0,
+        "center": Vector(0, 0, 0.1),
+        "distance": 1.5,
         "elevation": 30,
         "azimuth": 135,
     }
@@ -184,15 +184,15 @@ class IMU3D(GLViewWidget):
         )
 
         # Items
-        self.world_rf = IMUReferenceFrame(parent_widget=self, size=1, alpha=128, show_cube=False)
-        self.imu_rf = IMUReferenceFrame(parent_widget=self, size=0.5, width=5)
+        self.world_rf = IMUReferenceFrame(parent_widget=self, size=0.5, alpha=128, show_cube=False)
+        self.imu_rf = IMUReferenceFrame(parent_widget=self, size=0.25, width=5)
         
         self._add_grids()
         self._add_angle_arcs()
         self._add_accel_arrows()
         self._add_gyro_indicators()
 
-    def _add_angle_arcs(self, arc_radius=0.5):
+    def _add_angle_arcs(self, arc_radius=0.25):
         self.angle_arcs = []
         for axis, color in (
             ("x", QColor(MColors.RED)),
@@ -275,14 +275,18 @@ class IMU3D(GLViewWidget):
             arrow.setVisible(False)
             return
 
-        accel2len = 0.02
+        accel2len = 0.07
+        accel2width = 0.05
 
         desired_length = accel * accel2len
-        scale_factor = desired_length / arrow.length
+        desired_width = accel * accel2width
+        length_scale_factor = desired_length / arrow.length
+        width_scale_factor = desired_width / arrow.radius[0]
+        width_scale_factor = np.clip(width_scale_factor, 0.5, 1)
 
         tr_base = Transform3D(arrow.base_transform)
         tr_scale = Transform3D()
-        tr_scale.scale(1, 1, scale_factor)
+        tr_scale.scale(width_scale_factor, width_scale_factor, length_scale_factor)
         tr = tr_base * tr_scale
 
         arrow.setTransform(tr)
@@ -296,7 +300,7 @@ class IMU3D(GLViewWidget):
         axis_unit_vec = axis_vec.normalized()
 
         # Arc
-        angular_speed_max = 10
+        angular_speed_max = 7
         ang_speed2angle = 360 / angular_speed_max * angular_speed
 
         arc_start = arc.base_transform.map(Vector(0, 0, 0))
@@ -310,7 +314,7 @@ class IMU3D(GLViewWidget):
         arc.setTransform(tr)
 
         # Arrow
-        angular_speed2len = 0.01
+        angular_speed2len = 0.1
         desired_length = angular_speed * angular_speed2len
         scale_factor = desired_length / arrow.length
 
@@ -337,6 +341,7 @@ class IMU3D(GLViewWidget):
         self.addItem(grid_1m)
 
 
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QApplication,
@@ -355,20 +360,16 @@ class IMU3DDemo(QMainWindow):
         self.setWindowTitle("IMU 3D Demo")
         self.resize(800, 600)
 
-        # Main widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # IMU widget
         self.imu_widget = IMU3D()
         main_layout.addWidget(self.imu_widget, stretch=1)
 
-        # Control panel
         control_layout = QHBoxLayout()
         main_layout.addLayout(control_layout)
 
-        # Rotation sliders
         for axis, label in zip(["X", "Y", "Z"], ["Roll", "Pitch", "Yaw"]):
             slider_layout = QVBoxLayout()
             control_layout.addLayout(slider_layout)
@@ -384,28 +385,24 @@ class IMU3DDemo(QMainWindow):
             slider_layout.addWidget(slider)
             setattr(self, f"slider_{axis.lower()}", slider)
 
-        # Timer for animation and data generation
         self.animation_angle = 0
         self.timer = QTimer()
-        # self.timer.timeout.connect(self.update_orientation) # Update orientation periodically
-        self.timer.start(30)  # Update roughly 33 times per second
+        self.timer.start(30)
 
-        # Store previous orientation for gyro calculation
         self.prev_roll = 0.0
         self.prev_pitch = 0.0
         self.prev_yaw = 0.0
-        self.dt = self.timer.interval() / 1000.0  # Time step in seconds
+        self.dt = self.timer.interval() / 1000.0
 
     def update_orientation(self):
-        # --- Get current rotation angles ---
         roll_deg = self.slider_x.value()
         pitch_deg = self.slider_y.value()
         yaw_deg = self.slider_z.value()
+        
         roll = np.radians(roll_deg)
         pitch = np.radians(pitch_deg)
         yaw = np.radians(yaw_deg)
 
-        # --- Convert Euler angles to quaternion ---
         qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(
             pitch / 2
         ) * np.sin(yaw / 2)
@@ -420,32 +417,23 @@ class IMU3DDemo(QMainWindow):
         ) * np.sin(yaw / 2)
         quaternion = QQuaternion(qw, qx, qy, qz)
 
-        # --- Simulate Accelerometer Data (Gravity Vector in IMU Frame) ---
-        # Assume gravity points down along the world Z-axis
         gravity_world = Vector(0, 0, -9.81)
-        # Rotate the world gravity vector into the IMU's frame using the inverse rotation
-        # QQuaternion.rotatedVector is equivalent to q * v * q^-1
         accel_vector = quaternion.conjugated().rotatedVector(gravity_world)
-        # Add some noise (optional)
         noise = np.random.normal(0, 0.1, 3)
         accel = Vector(
             accel_vector.x() + noise[0], accel_vector.y() + noise[1], accel_vector.z() + noise[2]
         )
 
-        # --- Simulate Gyroscope Data (Angular Velocity) ---
-        # Approximate angular velocity from change in Euler angles
-        # Note: This is a simplification and not perfectly accurate, especially near gimbal lock
         roll_rate = (roll - self.prev_roll) / self.dt
         pitch_rate = (pitch - self.prev_pitch) / self.dt
         yaw_rate = (yaw - self.prev_yaw) / self.dt
-        # Store current angles for next calculation
+        
         self.prev_roll = roll
         self.prev_pitch = pitch
         self.prev_yaw = yaw
-        # Combine into a vector (assuming rates are in radians/sec)
+        
         gyro = Vector(roll_rate, pitch_rate, yaw_rate)
 
-        # --- Update IMU Widget ---
         self.imu_widget.update_data(quaternion, accel, gyro)
 
 

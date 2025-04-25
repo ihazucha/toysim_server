@@ -14,7 +14,7 @@ from datalink.data import Rotation
 from modules.ui.presets import Colors
 
 FPS = 30
-DATA_QUEUE_LENGTH_SECONDS = 10
+DATA_QUEUE_LENGTH_SECONDS = 5
 DATA_QUEUE_SIZE = FPS * DATA_QUEUE_LENGTH_SECONDS
 
 PLOT_QUEUE_DEFAULT_DATA = list([0 for _ in range(DATA_QUEUE_SIZE)])

@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtGui import QPixmap, QIcon, QQuaternion
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -38,6 +38,14 @@ from modules.ui.settings import WindowSettings
 
 import time
 
+import pyqtgraph as pg
+
+try:
+    import OpenGL
+    pg.setConfigOption('useOpenGL', True)
+    pg.setConfigOption('enableExperimental', True)
+except Exception as e:
+    print(f"Enabling OpenGL failed with {e}. Will result in slow rendering. Try installing PyOpenGL.")
 
 # Utils
 # -------------------------------------------------------------------------------------------------
@@ -54,7 +62,7 @@ def toggle_widget(w: QWidget):
 class EMALatencyLabel(QLabel):
     """Exponential Moving Average latency measurement"""
 
-    def __init__(self, name: str, label_update_freq=60):
+    def __init__(self, name: str, label_update_freq=120):
         self._name = name
         self._label_update_freq = label_update_freq
 
@@ -144,7 +152,7 @@ class RendererMainWindow(QMainWindow):
         self.tabs.addTab(tab_sensors, "Sensors")
         # self.tabs.addTab(tab_system, "System")
 
-        self.tabs.setCurrentIndex(1) # Set "Sensors" tab as default
+        self.tabs.setCurrentIndex(1)  # Set "Sensors" tab as default
 
         self.setCentralWidget(self.tabs)
 
@@ -216,7 +224,7 @@ class RendererMainWindow(QMainWindow):
         imu_rotation_layout = QVBoxLayout()
         imu_rotation_layout.addWidget(self.imu3d_plot, stretch=1)
         imu_rotation_layout.addWidget(self.imu_rotation_plot, stretch=1)
-        
+
         imu_components_layout = QVBoxLayout()
         imu_components_layout.addWidget(self.imu_accel_plot, stretch=1)
         imu_components_layout.addWidget(self.imu_gyro_plot, stretch=1)
@@ -275,7 +283,7 @@ class RendererMainWindow(QMainWindow):
 
         self.data_latency_label = EMALatencyLabel(name="Data")
         self.gui_latency_label = EMALatencyLabel(name="GUI")
-        
+
         latency_labels_widget = QWidget()
         latency_labels_layout = QHBoxLayout(latency_labels_widget)
         latency_labels_layout.setContentsMargins(0, 3, 10, 5)
@@ -336,8 +344,8 @@ class RendererMainWindow(QMainWindow):
         rgb_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
         self.rgb_graphics_view.set_pixmap(rgb_pixmap)
 
-        # rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
-        # self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
+        rgb_updated_pixmap = QPixmap.fromImage(data.rgb_updated_qimage)
+        self.depth_graphics_view.set_pixmap(rgb_updated_pixmap)
 
         self.map3d_plot.update_data(
             car_x=0,
@@ -360,75 +368,81 @@ class RendererMainWindow(QMainWindow):
 
         # Sensors
         # ----------
-        encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
-        self.left_encoder_plot.update(encoder_data_samples)
-        self.right_encoder_plot.update(encoder_data_samples)
+        # encoder_data_samples = [x.encoder_data for x in data.raw.original.sensor_fusion.speedometer]
+        # self.left_encoder_plot.update(encoder_data_samples)
+        # self.right_encoder_plot.update(encoder_data_samples)
 
-        self.imu3d_plot.update_data(quaternion=data.raw.original.sensor_fusion.imu.qu)
+        imu_data = data.raw.original.sensor_fusion.imu
+        if len(imu_data):
+            last_imu_data = imu_data[-1]
+            for data in imu_data:
+                self.imu3d_plot.update_data(
+                    quaternion=QQuaternion(*data.rotation_quaternion),
+                    accel=data.accel_linear,
+                    gyro=data.gyro,
+                )
+            self.imu_accel_plot.update(last_imu_data.accel_linear)
+            self.imu_gyro_plot.update(last_imu_data.gyro)
+            self.imu_mag_plot.update(last_imu_data.mag)
 
 
 class Renderer:
-    def run(self, return_window=False):
-        app = QApplication.instance() or QApplication(sys.argv)
-        app.setStyleSheet(APP_STYLE)
-        app.setFont(Fonts.GUIMonospace)
-        window = RendererMainWindow()
+    def run(self):
+        self.app = QApplication.instance() or QApplication(sys.argv)
+        self.app.setStyleSheet(APP_STYLE)
+        self.app.setFont(Fonts.GUIMonospace)
+        
+        self.window = RendererMainWindow()
 
         t_sim_data = SimDataThread()
-        t_sim_data.data_ready.connect(window.update_simulation_data)
+        t_sim_data.data_ready.connect(self.window.update_simulation_data)
         # window.init_complete.connect(t_sim_data.start)
 
         t_vehicle_data = VehicleDataThread()
-        t_vehicle_data.data_ready.connect(window.update_real_data)
-        window.init_complete.connect(t_vehicle_data.start)
+        t_vehicle_data.data_ready.connect(self.window.update_real_data)
+        self.window.init_complete.connect(t_vehicle_data.start)
 
         t_recorder = RecorderThread(data_queue=messaging.q_processing)
-        window.init_complete.connect(t_recorder.start)
+        self.window.init_complete.connect(t_recorder.start)
 
         t_playback = PlaybackThread(data_queue=messaging)
-        window.init_complete.connect(t_playback.start)
+        self.window.init_complete.connect(t_playback.start)
 
         threads = [t_sim_data, t_vehicle_data, t_recorder, t_playback]
 
-        def stop_threads():
-            print("Shutting down threads gracefully...")
+        self.window.init()
+        self.window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
+        self.window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
+        self.window.records_sidebar.record_selected.connect(t_playback.set_current_record)
+        self.window.records_sidebar.record_selected.connect(self.window.top_tool_bar.handle_record_selected)
 
-            for t in threads:
-                if hasattr(t, "requestInterruption"):
-                    t.requestInterruption()
+        self.window.records_sidebar.record_selected.emit("1745511004652250500")
+        self.window.top_tool_bar.playback_toggled.emit(True)
 
-            # Give threads time to process the interruption request
-            QApplication.processEvents()
+        self.app.aboutToQuit.connect(lambda: stop_threads(threads))
+        
+        return self.app.exec()
 
-            for t in threads:
-                if hasattr(t, "stop"):
-                    try:
-                        t.stop()
-                    except Exception as e:
-                        print(f"Error stopping thread {t}: {e}")
+def stop_threads(threads):
+    print("Shutting down threads gracefully...")
 
-            # Wait with timeout
-            for t in threads:
-                if not t.wait(1000):  # 1 second timeout
-                    print(f"Thread {t} did not quit in time, forcing termination")
-                    t.terminate()
-                    t.wait()
+    for t in threads:
+        if hasattr(t, "requestInterruption"):
+            t.requestInterruption()
 
-        app.aboutToQuit.connect(stop_threads)
+    # Give threads time to process the interruption request
+    QApplication.processEvents()
 
-        window.init()
-        window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
-        window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
-        window.records_sidebar.record_selected.connect(t_playback.set_current_record)
-        window.records_sidebar.record_selected.connect(window.top_tool_bar.handle_record_selected)
+    for t in threads:
+        if hasattr(t, "stop"):
+            try:
+                t.stop()
+            except Exception as e:
+                print(f"Error stopping thread {t}: {e}")
 
-        # window.records_sidebar.record_selected.emit("1744726034609610300")
-        # window.top_tool_bar.playback_toggled.emit(True)
-
-        self.app = app
-        self.window = window
-
-        if return_window:
-            return window
-        else:
-            return app.exec()
+    # Wait with timeout
+    for t in threads:
+        if not t.wait(1000):  # 1 second timeout
+            print(f"Thread {t} did not quit in time, forcing termination")
+            t.terminate()
+            t.wait()

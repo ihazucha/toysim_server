@@ -99,7 +99,7 @@ class SteeringPlotWidget(PlotWidget):
         self._input_color = Colors.ORANGE
 
         self._update_counter = 0
-        self._update_frequency = 2
+        self._update_frequency = 1
 
         self._setup_axes()
         self._setup_legend()
@@ -141,11 +141,11 @@ class SteeringPlotWidget(PlotWidget):
         self.legend.setColumnCount(3)
 
     def _setup_plots(self):
-        estimated_sa_pen = mkPen(self._estimated_sa_color, style=Qt.PenStyle.SolidLine, width=2)
+        estimated_sa_pen = mkPen(self._estimated_sa_color, style=Qt.PenStyle.SolidLine, width=1)
         self._estimated_sa_plot = self.plot(name="Estimated", pen=estimated_sa_pen, antialias=True)
         self._estimated_sa_plot.setData(self._x, self._estimated_sa_data)
 
-        target_sa_pen = mkPen(self._target_color, style=Qt.PenStyle.DashLine, width=2)
+        target_sa_pen = mkPen(self._target_color, style=Qt.PenStyle.DashLine, width=1)
         self._target_sa_plot = self.plot(name="Target", pen=target_sa_pen, antialias=True)
         self._target_sa_plot.setData(self._x, self._target_sa_data)
 
@@ -184,3 +184,4 @@ class SteeringPlotWidget(PlotWidget):
             self._input_sa_plot.setData(self._x, self._input_sa_data)
 
         self._update_counter = (self._update_counter + 1) % self._update_frequency
+

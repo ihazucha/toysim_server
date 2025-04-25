@@ -97,7 +97,7 @@ class SpeedPlotWidget(PlotWidget):
         self._x_data = np.array(PLOT_TIME_STEPS)
         
         self._update_counter= 0
-        self._update_frequency = 2
+        self._update_frequency = 1
 
         # Y-axis rescaling
         self._rescale_counter = 0
@@ -145,11 +145,11 @@ class SpeedPlotWidget(PlotWidget):
         self.legend.setColumnCount(3)
 
     def _setup_plots(self):
-        speed_pen = mkPen(self.speed_color, style=Qt.PenStyle.SolidLine, width=2)
+        speed_pen = mkPen(self.speed_color, style=Qt.PenStyle.SolidLine, width=1)
         self._measured_speed_plot = self.plot(name="Measured", pen=speed_pen, antialias=True)
         self._measured_speed_plot.setData(self._x_data, self._speed_data)
         
-        target_pen = mkPen(self.speed_color, style=Qt.PenStyle.DashLine, width=2)
+        target_pen = mkPen(self.speed_color, style=Qt.PenStyle.DashLine, width=1)
         self._target_speed_plot = self.plot(name="Target", pen=target_pen, antialias=True)
         self._target_speed_plot.setData(self._x_data, self._target_data)
         

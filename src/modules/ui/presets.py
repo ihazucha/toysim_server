@@ -1,8 +1,9 @@
 import numpy as np
 from typing import Iterable
+from time import perf_counter
 
 from PySide6.QtGui import QFont, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtWidgets import (
     QSizePolicy,
     QGraphicsView,
@@ -114,8 +115,8 @@ class FitGraphicsView(QGraphicsView):
     def set_pixmap(self, pixmap):
         """Set the pixmap and fit it to the view."""
         self.pixmap_item.setPixmap(pixmap)
-        if not pixmap.isNull():
-            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        # if not pixmap.isNull():
+            # self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
 
     def resizeEvent(self, event):
         # """Scale the pixmap when the view is resized."""
@@ -154,3 +155,27 @@ class PlotWidgetHorizontalCursor:
         else:
             self.vLine.setVisible(False)
             self.update_values_at_index_callback(-1)
+
+class FrameCounter(QObject):
+    sigFpsUpdate = Signal(object)
+
+    def __init__(self, interval=1000):
+        super().__init__()
+        self.count = 0
+        self.last_update = 0
+        self.interval = interval
+
+    def update(self):
+        self.count += 1
+
+        if self.last_update == 0:
+            self.last_update = perf_counter()
+            self.startTimer(self.interval)
+
+    def timerEvent(self, evt):
+        now = perf_counter()
+        elapsed = now - self.last_update
+        fps = self.count / elapsed
+        self.last_update = now
+        self.count = 0
+        self.sigFpsUpdate.emit(fps)

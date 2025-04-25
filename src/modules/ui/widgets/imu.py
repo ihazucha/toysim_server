@@ -84,14 +84,14 @@ class GyroPlotWidget(PlotWidget):
         self._z_color = Colors.PASTEL_BLUE
 
         self._update_counter = 0
-        self._update_frequency = 2
+        self._update_frequency = 1
 
         self._setup_axes()
         self._setup_legend()
         self._setup_plots()
 
     def _setup_axes(self):
-        self.setYRange(-5.0, 5.0, padding=0)
+        self.setYRange(-2.0, 2.0, padding=0)
 
         # def format_ticks_align_left(values, scale, spacing):
         #     return [f"{v:<4.0f}" for v in values]
@@ -122,16 +122,16 @@ class GyroPlotWidget(PlotWidget):
         self.legend.setColumnCount(3)
 
     def _setup_plots(self):
-        x_pen = mkPen(self._x_color, style=Qt.PenStyle.SolidLine, width=2)
-        self._x_plot = self.plot(name="X", pen=x_pen, antialias=True)
+        x_pen = mkPen(self._x_color, style=Qt.PenStyle.SolidLine, width=1)
+        self._x_plot = self.plot(name="X", pen=x_pen, antialias=True, skipFiniteCheck=True)
         self._x_plot.setData(self._n_steps, self._z_data)
 
-        y_pen = mkPen(self._y_color, style=Qt.PenStyle.SolidLine, width=2)
-        self._y_plot = self.plot(name="Y", pen=y_pen, antialias=True)
+        y_pen = mkPen(self._y_color, style=Qt.PenStyle.SolidLine, width=1)
+        self._y_plot = self.plot(name="Y", pen=y_pen, antialias=True, skipFiniteCheck=True)
         self._y_plot.setData(self._n_steps, self._x_data)
 
-        z_pen = mkPen(self._z_color, style=Qt.PenStyle.SolidLine, width=2)
-        self._z_plot = self.plot(name="Z", pen=z_pen, antialias=True)
+        z_pen = mkPen(self._z_color, style=Qt.PenStyle.SolidLine, width=1)
+        self._z_plot = self.plot(name="Z", pen=z_pen, antialias=True, skipFiniteCheck=True)
         self._z_plot.setData(self._n_steps, self._y_data)
 
 
