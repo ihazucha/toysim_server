@@ -1,93 +1,155 @@
-"""
-This example demonstrates the creation of a plot with 
-DateAxisItem and a customized ViewBox. 
-"""
+# import itertools
 
+# import numpy as np
+# from utils import FrameCounter
+
+
+# import pyqtgraph as pg
+# from pyqtgraph.Qt import QtCore, QtWidgets
+
+
+# app = pg.mkQApp()
+
+# class IMURawRemotePlotWidget(pg.RemoteGraphicsView):
+#     def __init__(self):
+#         super().__init__()
+#         self.pg.setConfigOptions(antialias=True)
+        
+#         self.data = self._proc.transfer(np.array(2500))
+        
+#         self._plt = self.pg.PlotItem()
+#         self._plt.setYRange(50, -50, padding=0)
+#         self._plt.getAxis("left").setPen(dict(color='y', width=1, style=QtCore.Qt.PenStyle.DashLine))
+#         self._plt._setProxyOptions(deferGetattr=True)  ## speeds up access to rplt.plot
+#         self.curve = self._plt.plot()  
+#         self.setCentralItem(self._plt)
+#         self._plt._setProxyOptions(callSync="off")
+#     def update_data(self, data):
+#         if data is None:
+#             return None
+#         x = np.array(2500)
+#         x[:] = data
+#         self.curve.setData(self.data, clear=True, _callSync='off')  
+#         framecnt.update()
+
+# view = IMURawRemotePlotWidget()
+
+# app.aboutToQuit.connect(view.close)
+
+# layout = pg.LayoutWidget()
+# label = QtWidgets.QLabel()
+# layout.addWidget(label)
+# layout.addWidget(view, row=1, col=0, colspan=3)
+# layout.resize(800,800)
+# layout.show()
+
+
+# iterations_counter = itertools.count()
+
+# timer = QtCore.QTimer()
+# timer.timeout.connect(lambda: view.update_data(get_data()))
+# timer.start(0)
+
+# def get_data():
+#     if next(iterations_counter) > 500:
+#         timer.stop()
+#         app.quit()
+#         return None
+
+#     data = np.random.normal(size=(10000,50)).sum(axis=1)
+#     data += 5 * np.sin(np.linspace(0, 10, data.shape[0]))
+#     return data
+
+
+# framecnt = FrameCounter()
+# framecnt.sigFpsUpdate.connect(lambda fps : label.setText(f"Generating {fps:.1f}"))
+
+
+# if __name__ == '__main__':
+#     pg.exec()
+
+
+import argparse
+import itertools
 
 import numpy as np
+from utils import FrameCounter
 
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtCore
+from pyqtgraph.Qt import QtCore, QtWidgets
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--iterations', default=float('inf'), type=float)
+args = parser.parse_args()
 
-class CustomViewBox(pg.ViewBox):
-    def __init__(self, *args, **kwds):
-        kwds['enableMenu'] = False
-        pg.ViewBox.__init__(self, *args, **kwds)
-        self.setMouseMode(self.RectMode)
-        
-    ## reimplement right-click to zoom out
-    def mouseClickEvent(self, ev):
-        if ev.button() == QtCore.Qt.MouseButton.RightButton:
-            self.autoRange()
-    
-    ## reimplement mouseDragEvent to disable continuous axis zoom
-    def mouseDragEvent(self, ev, axis=None):
-        if axis is not None and ev.button() == QtCore.Qt.MouseButton.RightButton:
-            ev.ignore()
-        else:
-            pg.ViewBox.mouseDragEvent(self, ev, axis=axis)
-
-class CustomTickSliderItem(pg.TickSliderItem):
-    def __init__(self, *args, **kwds):
-        pg.TickSliderItem.__init__(self, *args, **kwds)
-        
-        self.all_ticks = {}
-        self._range = [0,1]
-    
-    def setTicks(self, ticks):
-        for tick, pos in self.listTicks():
-            self.removeTick(tick)
-        
-        for pos in ticks:
-            tickItem = self.addTick(pos, movable=False, color="#333333")
-            self.all_ticks[pos] = tickItem
-        
-        self.updateRange(None, self._range)
-    
-    def updateRange(self, vb, viewRange):
-        origin = self.tickSize/2.
-        length = self.length
-
-        lengthIncludingPadding = length + self.tickSize + 2
-        
-        self._range = viewRange
-        
-        for pos in self.all_ticks:
-            tickValueIncludingPadding = (pos - viewRange[0]) / (viewRange[1] - viewRange[0])
-            tickValue = (tickValueIncludingPadding*lengthIncludingPadding - origin) / length
-            
-            # Convert from np.bool_ to bool for setVisible
-            visible = bool(tickValue >= 0 and tickValue <= 1)
-            
-            tick = self.all_ticks[pos]
-            tick.setVisible(visible)
-
-            if visible:
-                self.setTickValue(tick, tickValue)
+iterations_counter = itertools.count()
 
 app = pg.mkQApp()
 
-axis = pg.DateAxisItem(orientation='bottom')
-vb = CustomViewBox()
+view = pg.widgets.RemoteGraphicsView.RemoteGraphicsView()
+view_setData = pg.widgets.RemoteGraphicsView.RemoteGraphicsView()
 
-pw = pg.PlotWidget(viewBox=vb, axisItems={'bottom': axis}, enableMenu=False, title="PlotItem with DateAxisItem, custom ViewBox and markers on x axis<br>Menu disabled, mouse behavior changed: left-drag to zoom, right-click to reset zoom")
+pg.setConfigOptions(antialias=True)
 
-dates = np.arange(8) * (3600*24*356)
-pw.plot(x=dates, y=[1,6,2,4,3,5,6,8], symbol='o')
+view.pg.setConfigOptions(antialias=True)
+view_setData.pg.setConfigOptions(antialias=True)
+view.setWindowTitle('pyqtgraph example: RemoteSpeedTest')
+view.setWindowTitle('pyqtgraph example: RemoteSpeedTest (setData)')
 
-# Using allowAdd and allowRemove to limit user interaction
-tickViewer = CustomTickSliderItem(allowAdd=False, allowRemove=False)
-vb.sigXRangeChanged.connect(tickViewer.updateRange)
-pw.plotItem.layout.addItem(tickViewer, 4, 1)
+app.aboutToQuit.connect(view.close)
 
-tickViewer.setTicks( [dates[0], dates[2], dates[-1]] )
+label = QtWidgets.QLabel()
+rcheck = QtWidgets.QCheckBox('plot remote (plot)')
+rcheck_setData = QtWidgets.QCheckBox('plot remote (setData)')
+rcheck.setChecked(True)
+lcheck = QtWidgets.QCheckBox('plot local')
+lplt = pg.PlotWidget()
+layout = pg.LayoutWidget()
 
-pw.show()
-pw.setWindowTitle('pyqtgraph example: customPlot')
+layout.addWidget(rcheck)
+layout.addWidget(lcheck)
+layout.addWidget(rcheck_setData)
+layout.addWidget(label)
+layout.addWidget(view, row=1, col=0, colspan=3)
+layout.addWidget(lplt, row=2, col=0, colspan=3)
+layout.addWidget(view_setData, row=3, col=0, colspan=3)
+layout.resize(800,800)
+layout.show()
 
-r = pg.PolyLineROI([(0,0), (10, 10)])
-pw.addItem(r)
+rplt = view.pg.PlotItem()
+rplt._setProxyOptions(deferGetattr=True)
+view.setCentralItem(rplt)
+
+rplt_setData = view_setData.pg.PlotItem()
+rplt_setData._setProxyOptions(deferGetattr=True)
+rplt_setData_dataItem = rplt_setData.plot()
+view_setData.setCentralItem(rplt_setData)
+
+def update():
+    if next(iterations_counter) > args.iterations:
+        timer.stop()
+        app.quit()
+        return None
+
+    data = np.random.normal(size=(10000,50)).sum(axis=1)
+    data += 5 * np.sin(np.linspace(0, 10, data.shape[0]))
+    
+    if rcheck.isChecked():
+        rplt.plot(data, clear=True, _callSync="off")
+    if lcheck.isChecked():
+        lplt.plot(data, clear=True)
+    if rcheck_setData.isChecked():
+        processed_data = np.ascontiguousarray(data)  # Ensure data is C-contiguous
+        rplt_setData_dataItem.setData(processed_data, _callSync="off")
+
+    framecnt.update()
+        
+timer = QtCore.QTimer()
+timer.timeout.connect(update)
+timer.start(0)
+
+framecnt = FrameCounter()
+framecnt.sigFpsUpdate.connect(lambda fps : label.setText(f"Generating {fps:.1f}"))
 
 if __name__ == '__main__':
     pg.exec()

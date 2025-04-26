@@ -11,7 +11,7 @@ from modules.recorder import RecordReader
 from datalink.data import Position, Rotation, Pose, ProcessedRealData
 from utils.paths import record_path
 
-from modules.path_planning.red_roadmarks import (
+from src.modules.path_planning.roadmarks import (
     RoadmarksPlannerConfig,
     Camera,
     rpi_v2_intrinsic_matrix,
