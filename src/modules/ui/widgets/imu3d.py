@@ -1,7 +1,5 @@
 import sys
 
-sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
-
 import numpy as np
 from typing import Tuple
 
@@ -20,7 +18,7 @@ from PySide6.QtWidgets import (
 from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLLinePlotItem
 from pyqtgraph import Transform3D, Vector
 
-from modules.ui.presets import MColors
+from modules.ui.presets import GLColors, UIColors
 from modules.ui.widgets.opengl.shapes import OpaqueCube, customNormalColor, Cone
 
 # Helpers
@@ -60,6 +58,9 @@ def print_quat(quaternion: QQuaternion):
 # Widgets
 # -----------------------------------------------------------------------------
 
+COLOR_RED = QColor(UIColors.RED)
+COLOR_GREEN = QColor(UIColors.GREEN)
+COLOR_BLUE = QColor(UIColors.BLUE)
 
 class IMUReferenceFrame:
     def __init__(
@@ -67,7 +68,7 @@ class IMUReferenceFrame:
         parent_widget: GLViewWidget,
         size=0.025,
         width=3,
-        alpha=255,
+        alpha=1,
         show_cube=True,
     ):
         self.parent_widget = parent_widget
@@ -98,13 +99,13 @@ class IMUReferenceFrame:
 
     def _add_axis_lines(self):
         for axis_name, color, end_point in (
-            ("x", QColor(MColors.RED), [self.size, 0, 0]),
-            ("y", QColor(MColors.GREEN), [0, self.size, 0]),
-            ("z", QColor(MColors.BLUE), [0, 0, self.size]),
+            ("x", COLOR_RED, [self.size, 0, 0]),
+            ("y", COLOR_GREEN, [0, self.size, 0]),
+            ("z", COLOR_BLUE, [0, 0, self.size]),
         ):
             color.setAlpha(self.alpha)
             axis_line = GLLinePlotItem(
-                pos=np.array([[0, 0, 0], end_point]), color=color, width=self.width, antialias=True
+                pos=np.array([[0, 0, 0], end_point]), color=color.getRgbF(), width=self.width, antialias=True
             )
             setattr(self, axis_name, axis_line)
             self.parent_widget.addItem(axis_line)
@@ -127,7 +128,7 @@ class ArcItem:
         segments=32,
         radius=1,
         width=1,
-        color: QColor = MColors.WHITE,
+        color: QColor = GLColors.WHITE,
         base_transform=Transform3D(),
     ):
         self.parent_widget = parent_widget
@@ -167,7 +168,7 @@ class ArcItem:
 
 class IMU3D(GLViewWidget):
     INIT_OPTS = {
-        "center": Vector(0, 0, 0.1),
+        "center": Vector(0.1, 0.1, 0.1),
         "distance": 1.5,
         "elevation": 30,
         "azimuth": 135,
@@ -184,8 +185,8 @@ class IMU3D(GLViewWidget):
         )
 
         # Items
-        self.world_rf = IMUReferenceFrame(parent_widget=self, size=0.5, alpha=128, show_cube=False)
-        self.imu_rf = IMUReferenceFrame(parent_widget=self, size=0.25, width=5)
+        self.world_rf = IMUReferenceFrame(parent_widget=self, size=0.5, alpha=64, show_cube=False)
+        self.imu_rf = IMUReferenceFrame(parent_widget=self, size=0.25, alpha=255, width=3)
         
         self._add_grids()
         self._add_angle_arcs()
@@ -195,9 +196,9 @@ class IMU3D(GLViewWidget):
     def _add_angle_arcs(self, arc_radius=0.25):
         self.angle_arcs = []
         for axis, color in (
-            ("x", QColor(MColors.RED)),
-            ("y", QColor(MColors.GREEN)),
-            ("z", QColor(MColors.BLUE)),
+            ("x", COLOR_RED),
+            ("y", COLOR_GREEN),
+            ("z", COLOR_BLUE),
         ):
             color.setAlpha(80)
             arc_item = ArcItem(parent_widget=self, color=color, width=2, radius=arc_radius)
@@ -206,9 +207,9 @@ class IMU3D(GLViewWidget):
     def _add_accel_arrows(self):
         self.accel_arrows = []
         for axis, color, offset in (
-            ("x", QColor(MColors.RED), (90, 0, 1, 0)),
-            ("y", QColor(MColors.GREEN), (-90, 1, 0, 0)),
-            ("z", QColor(MColors.BLUE), (0, 0, 0, 1)),
+            ("x", COLOR_RED, (90, 0, 1, 0)),
+            ("y", COLOR_GREEN, (-90, 1, 0, 0)),
+            ("z", COLOR_BLUE, (0, 0, 0, 1)),
         ):
             color.setAlpha(80)
             world_rf_axis = getattr(self.world_rf, axis)
@@ -227,9 +228,9 @@ class IMU3D(GLViewWidget):
         self.gyro_arrows = []
 
         for axis, color, arrow_rotation, arc_offset in (
-            ("x", QColor(MColors.RED), (90, 1, 0, 0), Vector(0, 0, arc_radius)),
-            ("y", QColor(MColors.GREEN), (90, 0, 1, 0), Vector(0, 0, arc_radius)),
-            ("z", QColor(MColors.BLUE), (90, 1, 0, 0), Vector(arc_radius, 0, 0)),
+            ("x", COLOR_RED, (90, 1, 0, 0), Vector(0, 0, arc_radius)),
+            ("y", COLOR_GREEN, (90, 0, 1, 0), Vector(0, 0, arc_radius)),
+            ("z", COLOR_BLUE, (90, 1, 0, 0), Vector(arc_radius, 0, 0)),
         ):
             color.setAlpha(128)
 

@@ -1,10 +1,8 @@
-from os import read
 import numpy as np
 import cv2
 
 from typing import Any, Iterable, Tuple
 from time import time_ns
-from collections import deque
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QImage, QPixmap, QQuaternion
@@ -49,11 +47,11 @@ class LatControlPlotData:
 
 
 class EncoderPlotData:
-    RADIAL_DATA_HISTORY_SIZE = 15
+    HISTORY_SIZE = 15
 
     def __init__(self):
-        self.radial_xs = np.zeros(self.RADIAL_DATA_HISTORY_SIZE)
-        self.radial_ys = np.zeros(self.RADIAL_DATA_HISTORY_SIZE)
+        self.radial_xs = np.zeros(self.HISTORY_SIZE)
+        self.radial_ys = np.zeros(self.HISTORY_SIZE)
 
         self.angle_deg = 0
         self.angle_deg_change = 0
@@ -72,7 +70,7 @@ class EncoderPlotData:
         for data in readings:
             angle_deg = data.position * ENCODER_RAW2DEG
             angle_deg_change = (angle_deg - self._last_angle_deg + 180) % 360 - 180
-            angle_deg_changes.append(abs(angle_deg_change))
+            angle_deg_changes.append(angle_deg_change)
             self._last_angle_deg = angle_deg
 
             magnitude_change = data.magnitude - self._last_magnitude
@@ -96,11 +94,11 @@ class EncoderPlotData:
 
 class IMURawPlotData:
     def __init__(self):
-        self.data = np.zeros((DATA_QUEUE_SIZE, 3))
+        self.data = np.zeros((3, DATA_QUEUE_SIZE))
 
     def update(self, xyz: Tuple[float, float, float]):
-        self.data[:-1] = self.data[1:]
-        self.data[-1] = xyz
+        self.data[:, :-1] = self.data[:, 1:]
+        self.data[:, -1] = xyz
 
 class IMUPlotData:
     def __init__(self):
@@ -112,6 +110,7 @@ class IMUPlotData:
         self.mag_avg = (0, 0, 0)
 
         self.rotation_euler_history = IMURawPlotData()
+        self.rotation_euler_deg_history = IMURawPlotData()
         self.accel_linear_avg_history = IMURawPlotData()
         self.gyro_avg_history = IMURawPlotData()
         self.mag_avg_history = IMURawPlotData()
@@ -132,6 +131,7 @@ class IMUPlotData:
         self.gyro_avg_history.update(self.gyro_avg)
         self.mag_avg_history.update(self.mag_avg)
         self.rotation_euler_history.update(self.rotation_euler)
+        self.rotation_euler_deg_history.update(self.rotation_euler_deg)
 
 class QSimData:
     def __init__(self, raw: ProcessedSimData):
@@ -269,7 +269,7 @@ class RealDataThread(QThread):
             self.imu_accel_plot_data_ready.emit(self.imu_plot_data.accel_linear_avg_history.data)
             self.imu_gyro_plot_data_ready.emit(self.imu_plot_data.gyro_avg_history.data)
             self.imu_mag_plot_data_ready.emit(self.imu_plot_data.mag_avg_history.data)
-            self.imu_rotation_plot_data_ready.emit(self.imu_plot_data.rotation_euler_history.data)
+            self.imu_rotation_plot_data_ready.emit(self.imu_plot_data.rotation_euler_deg_history.data)
 
             camera_rgb_pixmap = QPixmap.fromImage(np2q_img(image_array))
             self.camera_rgb_pixmap_ready.emit(camera_rgb_pixmap)
@@ -282,7 +282,7 @@ class RealDataThread(QThread):
             # qreal_data.lr_encoder_plot = self.lr_encoder_plot_data
             # qreal_data.rr_encoder_plot = self.rr_encoder_plot_data
             qreal_data.imu_plot = self.imu_plot_data
-            self.data_ready.emit(qreal_data)
+            self.data_ready.emit(qreal_data) 
 
     def stop(self):
         self._is_running = False

@@ -7,7 +7,7 @@ from typing import Any, Iterable, Set
 from copy import deepcopy
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QPen, QVector4D
+from PySide6.QtGui import QPainter, QPen, QVector4D, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLScatterPlotItem, GLLinePlotItem
 from pyqtgraph import Transform3D, Vector
 
-from modules.ui.presets import Fonts, MColors
+from modules.ui.presets import Fonts, GLColors, UIColors
 
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from modules.ui.widgets.opengl.models import Car3D
@@ -43,8 +43,8 @@ class PositionLabel2D(QLabel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setStyleSheet(
-            """
-            background-color: rgba(0, 0, 0, 120); 
+            f"""
+            background-color: rgba{QColor(UIColors.FOREGROUND).getRgb()}; 
             color: white; 
             padding: 5px;
             border-radius: 3px;
@@ -63,11 +63,11 @@ class PositionLabel2D(QLabel):
     def update_position(
         self, x: int, y: int, x_offset: int = 15, y_offset: int = -30, check_parent_bounds=True
     ):
-        # Show a lil to the side
+        # Distance from cursor
         x += x_offset
         y += y_offset
 
-        # Stay within widget bounds
+        # Within widget bounds
         if check_parent_bounds:
             if x + self.width() > self.parent().width():
                 x = x - self.width() - 5
@@ -84,19 +84,13 @@ class ReferenceFrameLabel(QLabel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        color = (
-            MColors.ORANGE.red(),
-            MColors.ORANGE.green(),
-            MColors.ORANGE.blue(),
-            MColors.ORANGE.alpha(),
-        )
         self.setStyleSheet(
             f"""
-            background-color: rgba(0, 0, 0, 180); 
-            color: rgba{color}; 
+            background-color: rgba{QColor(UIColors.FOREGROUND).getRgb()}; 
+            color: rgba{GLColors.ORANGE.getRgb()}; 
             padding: 5px;
             border-radius: 5px;
-            border: 1px solid rgba(120, 120, 120, 50);
+            border: 1px solid rgba{QColor(UIColors.ON_FOREGROUND_DIM).getRgb()};
             font-weight: bold;
         """
         )
@@ -223,9 +217,9 @@ class ViewportAxes(QWidget):
 
         # (X, Y, Z) world frame == (-Z, X, Y) image frame
         axes = [
-            ("X", Vector(0, 0, -1), MColors.RED),
-            ("Y", Vector(1, 0, 0), MColors.GREEN),
-            ("Z", Vector(0, 1, 0), MColors.BLUE),
+            ("X", Vector(0, 0, -1), GLColors.RED),
+            ("Y", Vector(1, 0, 0), GLColors.GREEN),
+            ("Z", Vector(0, 1, 0), GLColors.BLUE),
         ]
 
         for label, rotation, color in axes:
@@ -440,28 +434,6 @@ class ViewMovement:
         return Vector(0, 0, 0)
 
 
-class NavigationDataPlayer:
-    def __init__(self, update_data_callback: callable):
-        self.update_data_callback = update_data_callback
-
-        self._timer = QTimer()
-        self._timer.timeout.connect(self.play_next_frame)
-        self._timer.start(33)
-
-        from utils.paths import record_path
-        from modules.recorder import RecordReader
-        from datalink.data import ProcessedRealData
-
-        path = record_path("1744064791554416900")
-        self.data: list[ProcessedRealData] = RecordReader.read_all(path, ProcessedRealData)
-        self.idx = 0
-
-    def play_next_frame(self):
-        rm_data = self.data[self.idx].roadmarks_data
-        # self.update_data_callback(rm_data.roadmarks, rm_data.path)
-        self.update_data_callback(np.array([[1, 0]]), np.array([]))
-        self.idx = (self.idx + 1) % len(self.data)
-
 class Roadmark:
     def __init__(self, position):
         self.position = position
@@ -474,27 +446,14 @@ class NavigationData:
         self.parent_widget = parent_widget
         self.roadmarks = []
 
-        self.roadmarks_scatter = GLScatterPlotItem(size=10, color=MColors.TURQUOIS.getRgbF())
+        self.roadmarks_scatter = GLScatterPlotItem(size=10, color=GLColors.TURQUOIS.getRgbF())
         self.roadmarks_scatter.setDepthValue(1)
         self.parent_widget.addItem(self.roadmarks_scatter)
 
-        self.path = GLLinePlotItem(color=MColors.TURQUOIS.getRgbF(), width=3, antialias=True)
+        self.path = GLLinePlotItem(color=GLColors.TURQUOIS.getRgbF(), width=3, antialias=True)
         self.parent_widget.addItem(self.path)
 
     def update(self, roadmarks: np.ndarray, path: np.ndarray):
-        # self._clear()
-        # for rm in roadmarks:
-            # mesh = OpaqueCylinder(
-            #     radius=0.02,
-            #     height=0.001,
-            #     color=MColors.GRAY_TRANS.getRgbF(),
-            #     drawEdges=False,
-            #     drawFaces=True,
-            # )
-            # mesh.setDepthValue(-1)
-            # mesh.translate(dx=rm[0], dy=rm[1], dz=0.000)
-            # self.parent_widget.addItem(mesh)
-            # self.roadmarks.append(mesh)
         roadmarks3d = np.column_stack((roadmarks, np.zeros(roadmarks.shape[0]) + 0.001))
         self.roadmarks_scatter.setData(pos=roadmarks3d)
         path3d = np.column_stack((path, np.zeros(path.shape[0])))
@@ -519,8 +478,8 @@ class PositionTracker:
         self._rf_position = None
         self._T_world2rf = None
 
-        self.distance_color = MColors.PURPLISH_LIGHT
-        self.position_color = MColors.TURQUOIS
+        self.distance_color = GLColors.PURPLE
+        self.position_color = GLColors.TURQUOIS
 
     def update_rf(self, rf: ReferenceFrame):
         self._rf = rf
@@ -598,7 +557,7 @@ class Map3D(GLViewWidget):
 
     def __init__(self):
         super().__init__()
-        self.setBackgroundColor((10, 10, 10, 255))
+        self.setBackgroundColor(UIColors.FOREGROUND)
         self.setCameraPosition(
             pos=self.INIT_OPTS["center"],
             distance=self.INIT_OPTS["distance"],
@@ -622,7 +581,7 @@ class Map3D(GLViewWidget):
         self.path_planner_position_tracker = PositionTracker(parent=self)
         self.path_planner_position_tracker.update_rf(self.rfs.get_active())
         self.rf_position_tracker = PositionTracker(parent=self)
-        self.rf_position_tracker.position_color = MColors.WHITE
+        self.rf_position_tracker.position_color = GLColors.WHITE
         self.rf_position_tracker.update_rf(self.rfs.get_active())
         self.rf_position_tracker.update_items(items=ref_frames)
 
@@ -960,6 +919,27 @@ class Map3DDemo(QMainWindow):
         self.control_panel.pitch_slider.setValue(0)
         self.control_panel.yaw_slider.setValue(0)
 
+class NavigationDataPlayer:
+    def __init__(self, update_data_callback: callable):
+        self.update_data_callback = update_data_callback
+
+        self._timer = QTimer()
+        self._timer.timeout.connect(self.play_next_frame)
+        self._timer.start(33)
+
+        from utils.paths import record_path
+        from modules.recorder import RecordReader
+        from datalink.data import ProcessedRealData
+
+        path = record_path("1744064791554416900")
+        self.data: list[ProcessedRealData] = RecordReader.read_all(path, ProcessedRealData)
+        self.idx = 0
+
+    def play_next_frame(self):
+        rm_data = self.data[self.idx].roadmarks_data
+        # self.update_data_callback(rm_data.roadmarks, rm_data.path)
+        self.update_data_callback(np.array([[1, 0]]), np.array([]))
+        self.idx = (self.idx + 1) % len(self.data)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

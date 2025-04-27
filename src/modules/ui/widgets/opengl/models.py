@@ -1,7 +1,7 @@
 from pyqtgraph import Transform3D, Vector
 from pyqtgraph.opengl import GLViewWidget, GLBoxItem
 
-from modules.ui.presets import MColors, Colors
+from modules.ui.presets import GLColors, UIColors
 from modules.ui.widgets.opengl.helpers import ReferenceFrame
 from modules.ui.widgets.opengl.shapes import OpaqueCylinder
 from PySide6.QtGui import QColor
@@ -40,7 +40,7 @@ class Car3D:
         dimensions = Vector(
             CarProps.CHASSIS_LENGTH, CarProps.CHASSIS_WIDTH, CarProps.CHASSIS_HEIGHT
         )
-        self.body = GLBoxItem(size=dimensions, color=Colors.ON_ACCENT)
+        self.body = GLBoxItem(size=dimensions, color=UIColors.ON_ACCENT)
         self.body.lineplot.setData(width=2, antialias=True)
         self._body_offset = Vector(-0.01, -CarProps.CHASSIS_WIDTH / 2, CarProps.WHEEL_RADIUS)
 
@@ -54,7 +54,7 @@ class Car3D:
         self.wheels = []
         for _ in self._wheel_offsets:
             wheel = OpaqueCylinder(
-                radius=CarProps.WHEEL_RADIUS, height=CarProps.WHEEL_WIDTH, color=QColor(Colors.ON_ACCENT),
+                radius=CarProps.WHEEL_RADIUS, height=CarProps.WHEEL_WIDTH, color=QColor(UIColors.ON_ACCENT),
             )
             self.wheels.append(wheel)
 

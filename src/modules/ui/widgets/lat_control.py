@@ -9,7 +9,7 @@ from pyqtgraph import PlotWidget, mkPen
 
 from modules.ui.data import LatControlPlotData
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
-from modules.ui.presets import Colors, TooltipLabel, PlotWidgetHorizontalCursor
+from modules.ui.presets import UIColors, TooltipLabel, PlotWidgetHorizontalCursor
 
 
 class LateralControlWidget(QWidget):
@@ -36,10 +36,10 @@ class SteeringPlotStatsWidget(PlotStatsWidget):
         html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
 
         self.texts = {
-            "estimated_wsa": f"Est: {html_colored_number.format(Colors.PASTEL_BLUE)}",
-            "target_wsa": f"Tgt: {html_colored_number.format(Colors.PASTEL_BLUE)}",
-            "error_wsa": f"Err: {html_colored_number.format(Colors.RED)}",
-            "input": f"<span style='font-weight: bold'>SIA</span>: {html_colored_number.format(Colors.ORANGE)}",
+            "estimated_wsa": f"Est: {html_colored_number.format(UIColors.PASTEL_BLUE)}",
+            "target_wsa": f"Tgt: {html_colored_number.format(UIColors.PASTEL_BLUE)}",
+            "error_wsa": f"Err: {html_colored_number.format(UIColors.RED)}",
+            "input": f"<span style='font-weight: bold'>SIA</span>: {html_colored_number.format(UIColors.ORANGE)}",
         }
 
         wsa_header_label = TooltipLabel(
@@ -87,7 +87,7 @@ class SteeringPlotStatsWidget(PlotStatsWidget):
 class SteeringPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
-        self.setBackground(Colors.FOREGROUND)
+        self.setBackground(UIColors.FOREGROUND)
         self.getPlotItem().setTitle("Wheel Steer Angle | Steering Input Angle [°]")
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
 
@@ -96,9 +96,9 @@ class SteeringPlotWidget(PlotWidget):
         self._estimated_sa_data = np.zeros(DATA_QUEUE_SIZE)
         self._x = np.array(PLOT_TIME_STEPS)
 
-        self._estimated_sa_color = Colors.PASTEL_BLUE
-        self._target_color = Colors.PASTEL_BLUE
-        self._input_color = Colors.ORANGE
+        self._estimated_sa_color = UIColors.PASTEL_BLUE
+        self._target_color = UIColors.PASTEL_BLUE
+        self._input_color = UIColors.ORANGE
 
         self._setup_axes()
         self._setup_legend()
@@ -126,7 +126,7 @@ class SteeringPlotWidget(PlotWidget):
         def format_ticks_align_right(values, scale, spacing):
             return [f"{v:4.0f}" for v in values]
 
-        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.text_pen = mkPen(UIColors.ON_ACCENT)
         self.getAxis("left").setPen(self.text_pen)
         self.getAxis("left").setTextPen(self.text_pen)
         self.getAxis("left").tickStrings = format_ticks_align_right
@@ -143,8 +143,8 @@ class SteeringPlotWidget(PlotWidget):
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
         self.legend.anchor(itemPos=(0, 0), parentPos=(0, 1), offset=(15, -35))
-        self.legend.setBrush(QBrush(QColor(Colors.ACCENT)))
-        self.legend.setPen(mkPen(color=Colors.ON_FOREGROUND, width=0.5))
+        self.legend.setBrush(QBrush(QColor(UIColors.ACCENT)))
+        self.legend.setPen(mkPen(color=UIColors.ON_FOREGROUND, width=0.5))
         self.legend.layout.setContentsMargins(3, 1, 3, 1)
         self.legend.setColumnCount(3)
 

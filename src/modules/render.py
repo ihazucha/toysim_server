@@ -1,5 +1,5 @@
 import sys
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6 import QtGui
 from PySide6.QtWidgets import (
@@ -21,7 +21,7 @@ from modules.ui.plots import (
 from modules.ui.widgets.long_control import LongitudinalControlWidget
 from modules.ui.widgets.lat_control import LateralControlWidget
 from modules.ui.widgets.encoder import EncoderWidget
-from modules.ui.presets import Colors
+from modules.ui.presets import UIColors
 from modules.ui.widgets.map3d import Map3D
 from modules.ui.widgets.imu3d import IMU3D
 from modules.ui.widgets.imu import IMURawWidget
@@ -64,7 +64,7 @@ class EMALatencyLabel(QLabel):
         self._label_update_freq = label_update_freq
 
         super().__init__(f"{self._name} FPS: --")
-        self.setStyleSheet(f"color: {Colors.ON_FOREGROUND};")
+        self.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
 
         self._last_time = time.perf_counter()
         self._avg_dt = self._last_time
@@ -86,6 +86,7 @@ class EMALatencyLabel(QLabel):
 
 class RendererMainWindow(QMainWindow):
     init_complete = Signal()
+    tab_changed = Signal(int, str)
 
     def __init__(self):
         super().__init__()
@@ -101,7 +102,7 @@ class RendererMainWindow(QMainWindow):
         self.setStyleSheet(
             f"""
             QMainWindow {{
-                background-color: {Colors.PRIMARY};
+                background-color: {UIColors.PRIMARY};
             }}
         """
         )
@@ -148,6 +149,10 @@ class RendererMainWindow(QMainWindow):
         self.tabs.addTab(tab_dashboard, "Dashboard")
         self.tabs.addTab(tab_sensors, "Sensors")
         # self.tabs.addTab(tab_system, "System")
+
+        self.tabs.currentChanged.connect(
+            lambda idx: self.tab_changed.emit(idx, self.tabs.tabText(idx))
+        )
 
         self.tabs.setCurrentIndex(1)  # Set "Sensors" tab as default
 
@@ -204,8 +209,8 @@ class RendererMainWindow(QMainWindow):
         camera_layout.addWidget(self.camera_depth_view)
 
         # Encoders
-        self.left_encoder_plot = EncoderWidget(name="Left Rear")
-        self.right_encoder_plot = EncoderWidget(name="Right Rear")
+        self.left_encoder_plot = EncoderWidget(name="Left")
+        self.right_encoder_plot = EncoderWidget(name="Right")
         encoders_group = QGroupBox(title="Encoders")
         encoders_layout = QHBoxLayout(encoders_group)
         encoders_layout.addWidget(self.left_encoder_plot)
@@ -267,8 +272,8 @@ class RendererMainWindow(QMainWindow):
         status_bar.setStyleSheet(
             f"""
             QStatusBar {{
-                background-color: {Colors.ACCENT};
-                color: {Colors.ON_ACCENT};
+                background-color: {UIColors.ACCENT};
+                color: {UIColors.ON_ACCENT};
             }}
         """
         )
@@ -276,7 +281,7 @@ class RendererMainWindow(QMainWindow):
 
         # Latency labels
         latency_label = QLabel("<span style='font-weight: bold'>Latency</span> [ms] (FPS)")
-        latency_label.setStyleSheet(f"color: {Colors.ON_FOREGROUND};")
+        latency_label.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
 
         self.data_latency_label = EMALatencyLabel(name="Data")
         self.gui_latency_label = EMALatencyLabel(name="GUI")
@@ -331,7 +336,6 @@ class RendererMainWindow(QMainWindow):
             steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
         )
 
-
     def update_real_data(self, data: QRealData):
         # App Window
         self.data_latency_label.update()
@@ -348,7 +352,7 @@ class RendererMainWindow(QMainWindow):
         self.imu3d_plot.update_data(
             rotation_quaternion=data.imu_plot.rotation_quaternion,
             accel=data.imu_plot.accel_linear_avg,
-            gyro=data.imu_plot.gyro_avg
+            gyro=data.imu_plot.gyro_avg,
         )
 
 
@@ -357,8 +361,9 @@ class Renderer:
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.app.setStyleSheet(APP_STYLE)
         self.app.setFont(Fonts.GUIMonospace)
-        
+
         self.window = RendererMainWindow()
+        self.window.tab_changed.connect(self.on_tab_changed)
 
         t_recorder = RecorderThread(data_queue=messaging.q_processing)
         self.window.init_complete.connect(t_recorder.start)
@@ -370,35 +375,48 @@ class Renderer:
         t_sim_data.data_ready.connect(self.window.update_simulation_data)
         # window.init_complete.connect(t_sim_data.start)
 
-        t_vehicle_data = RealDataThread()
-        self.window.init_complete.connect(t_vehicle_data.start)
-      
-        threads = [t_sim_data, t_vehicle_data, t_recorder, t_playback]
+        self.t_vehicle_data = RealDataThread()
+        self.window.init_complete.connect(self.t_vehicle_data.start)
+
+        threads = [t_sim_data, self.t_vehicle_data, t_recorder, t_playback]
         self.window.init()
-      
-        t_vehicle_data.long_control_plot_data_ready.connect(self.window.long_control_widget.update)
-        t_vehicle_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
-        t_vehicle_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
-        t_vehicle_data.camera_rgb_updated_pixmap_ready.connect(self.window.depth_graphics_view.update)
-        t_vehicle_data.lr_encoder_plot_data_ready.connect(self.window.left_encoder_plot.update)
-        t_vehicle_data.rr_encoder_plot_data_ready.connect(self.window.right_encoder_plot.update)
-        t_vehicle_data.imu_accel_plot_data_ready.connect(self.window.imu_accel_plot.update)
-        t_vehicle_data.imu_gyro_plot_data_ready.connect(self.window.imu_gyro_plot.update)
-        t_vehicle_data.imu_mag_plot_data_ready.connect(self.window.imu_mag_plot.update)
-        t_vehicle_data.imu_rotation_plot_data_ready.connect(self.window.imu_rotation_plot.update)
-        t_vehicle_data.data_ready.connect(self.window.update_real_data)
+
+        self.t_vehicle_data.long_control_plot_data_ready.connect(self.window.long_control_widget.update)
+        self.t_vehicle_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
+        self.t_vehicle_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
+        self.t_vehicle_data.camera_rgb_updated_pixmap_ready.connect(
+            self.window.depth_graphics_view.update
+        )
+        self.t_vehicle_data.lr_encoder_plot_data_ready.connect(self.window.left_encoder_plot.update)
+        self.t_vehicle_data.rr_encoder_plot_data_ready.connect(self.window.right_encoder_plot.update)
+        self.t_vehicle_data.data_ready.connect(self.window.update_real_data)
 
         self.window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
         self.window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
         self.window.records_sidebar.record_selected.connect(t_playback.set_current_record)
-        self.window.records_sidebar.record_selected.connect(self.window.top_tool_bar.handle_record_selected)
-
+        self.window.records_sidebar.record_selected.connect(
+            self.window.top_tool_bar.handle_record_selected
+        )
         self.window.records_sidebar.record_selected.emit("1745511004652250500")
         self.window.top_tool_bar.playback_toggled.emit(True)
 
         self.app.aboutToQuit.connect(lambda: stop_threads(threads))
-        
+
         return self.app.exec()
+
+    @Slot(int, str)
+    def on_tab_changed(self, idx, name):
+        if name == "Sensors":
+            self.t_vehicle_data.imu_accel_plot_data_ready.connect(self.window.imu_accel_plot.update)
+            self.t_vehicle_data.imu_gyro_plot_data_ready.connect(self.window.imu_gyro_plot.update)
+            self.t_vehicle_data.imu_mag_plot_data_ready.connect(self.window.imu_mag_plot.update)
+            self.t_vehicle_data.imu_rotation_plot_data_ready.connect(self.window.imu_rotation_plot.update)
+        else:
+            self.t_vehicle_data.imu_accel_plot_data_ready.disconnect(self.window.imu_accel_plot.update)
+            self.t_vehicle_data.imu_gyro_plot_data_ready.disconnect(self.window.imu_gyro_plot.update)
+            self.t_vehicle_data.imu_mag_plot_data_ready.disconnect(self.window.imu_mag_plot.update)
+            self.t_vehicle_data.imu_rotation_plot_data_ready.disconnect(self.window.imu_rotation_plot.update)
+
 
 def stop_threads(threads):
     print("Shutting down threads gracefully...")

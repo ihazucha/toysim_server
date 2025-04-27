@@ -18,21 +18,19 @@ class Fonts:
     OpenGLMonospace = QFont("Monospace", 8)
     GUIMonospace = QFont("Monospace", 10)
 
-class MColors:
+class GLColors:
     WHITE = QColor(255, 255, 255, 255)
-    GRAY = QColor(125, 125, 125, 255)
-    GRAY_TRANS = QColor(185, 185, 185, 150)
+    BLACK = QColor(0, 0, 0, 255)
+    
     RED = QColor(255, 40, 40, 255)
     GREEN = QColor(40, 255, 40, 255)
     BLUE = QColor(40, 40, 255, 255)
-    BROWN = QColor(119, 49, 19, 255)
-    DARK_BROWN = QColor(101, 67, 33, 255)
-    PURPLISH = QColor(93, 23, 155, 255)
-    PURPLISH_LIGHT = QColor(136, 97, 170, 255)
+    
+    PURPLE = QColor(136, 97, 170, 255)
     TURQUOIS = QColor(23, 155, 93, 255)
     ORANGE = QColor(255, 165, 0, 255)
 
-class Colors:
+class UIColors:
     PRIMARY = "#202020"
     ON_PRIMARY = "#919090"
     
@@ -47,21 +45,18 @@ class Colors:
     ON_ACCENT = "#737473"
     ON_ACCENT_DIM = "#4A4A4A"
     
-    GREEN = "#98FB98"
-    RED = "#FB9898"
-    BLUE = "#98f9f9"
+    RED = "#d14f3e"
+    GREEN = "#3ed14f"
+    BLUE = "#3ec0d1"
     ORANGE = "#FFCC99"
     PASTEL_BLUE = "#98f9f9"
-    PASTEL_PURPLE = "#DDA0DD"
-    PASTEL_YELLOW = "#FFFFE0"
-    PASTEL_ORANGE = "#f99898"
 
 
 TOOLTIP_STYLE = f"""
     QToolTip {{
-        background-color: {Colors.FOREGROUND};
-        color: {Colors.ON_FOREGROUND};
-        border: 2px solid {Colors.ON_FOREGROUND_DIM};
+        background-color: {UIColors.FOREGROUND};
+        color: {UIColors.ON_FOREGROUND};
+        border: 2px solid {UIColors.ON_FOREGROUND_DIM};
         border-radius: 5px;
         white-space: nowrap;
         padding: 2px;
@@ -70,20 +65,20 @@ TOOLTIP_STYLE = f"""
 
 GROUPBOX_STYLE = f"""
     QGroupBox {{
-        border: 2px solid {Colors.ON_FOREGROUND_DIM};
+        border: 2px solid {UIColors.ON_FOREGROUND_DIM};
         border-radius: 5px;
         margin-top: 1ex;
         font-weight: bold;
         padding: 0px;
         padding-top: 3px;
-        color: {Colors.ON_PRIMARY};
+        color: {UIColors.ON_PRIMARY};
     }}
     QGroupBox::title {{
         subcontrol-origin: margin;
         subcontrol-position: top left; /* position at the top center */
         left: 10px;
-        background-color: {Colors.PRIMARY}; /* Use primary color for title background */
-        color: {Colors.ON_PRIMARY};
+        background-color: {UIColors.PRIMARY}; /* Use primary color for title background */
+        color: {UIColors.ON_PRIMARY};
     }}
 """
 
@@ -136,7 +131,7 @@ class PlotWidgetHorizontalCursor:
         self.plot_widget.setMouseEnabled(x=True, y=False)
 
         self.vLine = InfiniteLine(
-            angle=90, movable=False, pen=mkPen(color=Colors.ON_ACCENT, width=1)
+            angle=90, movable=False, pen=mkPen(color=UIColors.ON_ACCENT, width=1)
         )
         self.vLine.setVisible(False)
         self.plot_widget.addItem(self.vLine)

@@ -10,7 +10,7 @@ import pyqtgraph as pg
 
 from modules.ui.data import LongControlPlotData
 from modules.ui.plots import PlotStatsWidget, DATA_QUEUE_SIZE, STEP_TICKS, PLOT_TIME_STEPS
-from modules.ui.presets import Colors, TooltipLabel
+from modules.ui.presets import UIColors, TooltipLabel
 
 
 class LongitudinalControlWidget(QWidget):
@@ -39,10 +39,10 @@ class SpeedPlotStatsWidget(PlotStatsWidget):
         html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
 
         self.texts = {
-            "measured_speed": f"Msr: {html_colored_number.format(Colors.GREEN)}",
-            "target_speed": f"Tgt: {html_colored_number.format(Colors.GREEN)}",
-            "error_speed": f"Err: {html_colored_number.format(Colors.RED)}",
-            "power": f"<span style='font-weight: bold;'>Power</span>: {html_colored_number.format(Colors.ORANGE)}",
+            "measured_speed": f"Msr: {html_colored_number.format(UIColors.GREEN)}",
+            "target_speed": f"Tgt: {html_colored_number.format(UIColors.GREEN)}",
+            "error_speed": f"Err: {html_colored_number.format(UIColors.RED)}",
+            "power": f"<span style='font-weight: bold;'>Power</span>: {html_colored_number.format(UIColors.ORANGE)}",
         }
 
         speed_header_label = TooltipLabel("<span style='font-weight: bold;'>Speed</span>")
@@ -84,13 +84,13 @@ class SpeedPlotWidget(PlotWidget):
     def __init__(self):
         super().__init__()
 
-        self.setBackground(Colors.FOREGROUND)
+        self.setBackground(UIColors.FOREGROUND)
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.3)
         self.getPlotItem().setTitle("Speed [m/s] | Power [%]")
 
-        self.speed_color = Colors.GREEN
-        self.power_color = Colors.ORANGE
-        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.speed_color = UIColors.GREEN
+        self.power_color = UIColors.ORANGE
+        self.text_pen = mkPen(UIColors.ON_ACCENT)
 
         self._measured_speed_data = np.zeros(DATA_QUEUE_SIZE)
         self._target_speed_data = np.zeros(DATA_QUEUE_SIZE)
@@ -139,8 +139,8 @@ class SpeedPlotWidget(PlotWidget):
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
         self.legend.anchor(itemPos=(0, 0), parentPos=(0, 1), offset=(15, -35))
-        self.legend.setBrush(QBrush(QColor(Colors.ACCENT)))
-        self.legend.setPen(mkPen(color=Colors.ON_FOREGROUND, width=0.5))
+        self.legend.setBrush(QBrush(QColor(UIColors.ACCENT)))
+        self.legend.setPen(mkPen(color=UIColors.ON_FOREGROUND, width=0.5))
         self.legend.layout.setContentsMargins(3, 1, 3, 1)
         self.legend.setColumnCount(3)
 

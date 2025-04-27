@@ -5,7 +5,7 @@ from PySide6.QtGui import QPainter, QVector3D, QFont
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLTextItem
 from pyqtgraph import Transform3D, Vector
 
-from modules.ui.presets import MColors, Fonts
+from modules.ui.presets import GLColors, Fonts
 from modules.ui.widgets.opengl.shapes import OpaqueCube
 
 # Functions
@@ -61,16 +61,16 @@ class ReferenceFrame:
         self._is_focused = False
         self._scale_factor = 1
 
-        self._default_color = MColors.WHITE
+        self._default_color = GLColors.WHITE
         self._default_font = QFont(Fonts.OpenGLMonospace)
         self._default_font.setBold(True)
 
         x_line = np.array([[0] * 3, [size, 0, 0]])
-        self.x = GLLinePlotItem(pos=x_line, color=MColors.RED, width=3, antialias=True)
+        self.x = GLLinePlotItem(pos=x_line, color=GLColors.RED, width=3, antialias=True)
         y_line = np.array([[0] * 3, [0, size, 0]])
-        self.y = GLLinePlotItem(pos=y_line, color=MColors.GREEN, width=3, antialias=True)
+        self.y = GLLinePlotItem(pos=y_line, color=GLColors.GREEN, width=3, antialias=True)
         z_line = np.array([[0] * 3, [0, 0, size]])
-        self.z = GLLinePlotItem(pos=z_line, color=MColors.BLUE, width=3, antialias=True)
+        self.z = GLLinePlotItem(pos=z_line, color=GLColors.BLUE, width=3, antialias=True)
         self.xyz_lines = [self.x, self.y, self.z]
 
         radius = size / 8
@@ -119,7 +119,7 @@ class ReferenceFrame:
 
         if self._is_focused:
             font = QFont(self._default_font)
-            self.origin_label.setData(color=MColors.ORANGE, font=font)
+            self.origin_label.setData(color=GLColors.ORANGE, font=font)
             self.scale_factor = 2
         else:
             self.scale_factor = 1

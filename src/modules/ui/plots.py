@@ -11,7 +11,7 @@ import pyqtgraph as pg
 from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
 from datalink.data import Rotation
-from modules.ui.presets import Colors
+from modules.ui.presets import UIColors
 
 FPS = 30
 DATA_QUEUE_LENGTH_SECONDS = 5
@@ -44,19 +44,19 @@ class PltColors:
 
 
 class PlotStatsWidget(QFrame):
-    def __init__(self):
+    def __init__(self, layout=QHBoxLayout):
         super().__init__()
         self.setFrameShape(QFrame.StyledPanel)
         self.setFrameShadow(QFrame.Sunken)
         self.setStyleSheet(
             f"""
-            background-color: {Colors.ACCENT};
-            color: {Colors.ON_ACCENT};
+            background-color: {UIColors.ACCENT};
+            color: {UIColors.ON_ACCENT};
             border-radius: 2px;
             padding: 2px;
         """
         )
-        self.layout = QHBoxLayout(self)
+        self.layout = layout(self)
         self.layout.setContentsMargins(5, 2, 0, 2)
 
 
@@ -270,7 +270,7 @@ class MapPlotWidget(PlotWidget):
 
     def __init__(self):
         super().__init__()
-        self.setBackground(Colors.FOREGROUND)
+        self.setBackground(UIColors.FOREGROUND)
         self.setAspectLocked(True)
         self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
         self.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
@@ -305,7 +305,7 @@ class IMUPlotWidget(GLViewWidget):
     def __init__(self):
         super().__init__()
         self.setSizePolicy(self.sizePolicy())
-        self.setBackgroundColor(Colors.FOREGROUND)
+        self.setBackgroundColor(UIColors.FOREGROUND)
         self.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
 
         # Create the arrows using GLLinePlotItem
@@ -432,7 +432,7 @@ class EncoderPlotWidget(QWidget):
         self.plot_layout = QHBoxLayout(self.plot_container)
 
         self.polar_plot = PlotWidget()
-        self.polar_plot.setBackground(Colors.FOREGROUND)
+        self.polar_plot.setBackground(UIColors.FOREGROUND)
         self.polar_plot.setAspectLocked(True)
         self.polar_plot.showGrid(x=True, y=True, alpha=0.5)
         self.polar_plot.setTitle(f"{name} - Position")
@@ -444,8 +444,8 @@ class EncoderPlotWidget(QWidget):
         self.stats_widget = QFrame()
         self.stats_widget.setStyleSheet(
             f"""
-            background-color: {Colors.ACCENT};
-            color: {Colors.ON_ACCENT};
+            background-color: {UIColors.ACCENT};
+            color: {UIColors.ON_ACCENT};
             border-radius: 2px;
             padding: 2px;
         """
@@ -472,11 +472,11 @@ class EncoderPlotWidget(QWidget):
         self.main_layout.addWidget(self.stats_widget)
 
         # Initialize plot items
-        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.text_pen = mkPen(UIColors.ON_ACCENT)
         self.configure_axes(self.polar_plot)
 
         # Circle for reference
-        self.circle = pg.ScatterPlotItem(size=1, pen=mkPen(Colors.ON_FOREGROUND_DIM), brush=None)
+        self.circle = pg.ScatterPlotItem(size=1, pen=mkPen(UIColors.ON_FOREGROUND_DIM), brush=None)
         initial_circle_radius = 35
         self.draw_reference_circle(initial_circle_radius)
         self.polar_plot.addItem(self.circle)
@@ -487,19 +487,19 @@ class EncoderPlotWidget(QWidget):
             x = [0, initial_circle_radius * np.cos(rad)]
             y = [0, initial_circle_radius * np.sin(rad)]
             line = pg.PlotCurveItem(
-                x=x, y=y, pen=mkPen(Colors.ON_FOREGROUND_DIM, width=0.5, style=Qt.DotLine)
+                x=x, y=y, pen=mkPen(UIColors.ON_FOREGROUND_DIM, width=0.5, style=Qt.DotLine)
             )
             self.polar_plot.addItem(line)
 
             # Add angle labels
-            text = pg.TextItem(str(angle), anchor=(0.5, 0.5), color=Colors.ON_ACCENT)
+            text = pg.TextItem(str(angle), anchor=(0.5, 0.5), color=UIColors.ON_ACCENT)
             text_offset = initial_circle_radius + 15
             text.setPos(text_offset * np.cos(rad), text_offset * np.sin(rad))
             self.polar_plot.addItem(text)
 
         # Current point highlight
         self.current_point = ScatterPlotItem(
-            size=10, pen=mkPen(Colors.GREEN, width=2), brush=mkBrush(Colors.FOREGROUND)
+            size=10, pen=mkPen(UIColors.GREEN, width=2), brush=mkBrush(UIColors.FOREGROUND)
         )
         self.polar_plot.addItem(self.current_point)
 

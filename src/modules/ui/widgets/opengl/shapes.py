@@ -1,12 +1,14 @@
 import numpy as np
 from typing import Tuple
 
+from PySide6.QtGui import QColor
+
 from pyqtgraph import Vector, Transform3D
 from pyqtgraph.opengl.MeshData import MeshData
 from pyqtgraph.opengl.items.GLMeshItem import GLMeshItem
 from pyqtgraph.opengl.shaders import ShaderProgram, VertexShader, FragmentShader
 
-from modules.ui.presets import MColors
+from modules.ui.presets import GLColors, UIColors
 
 customWorldLight = ShaderProgram('customWorldLight', [
     VertexShader("""
@@ -54,18 +56,18 @@ customNormalColor = ShaderProgram('customNormalColor', [
             gl_Position = u_mvp * a_position;
         }
     """),
-    FragmentShader("""
+    FragmentShader(f"""
         #ifdef GL_ES
         precision mediump float;
         #endif
         varying vec4 v_color;
         varying vec3 v_normal;
 
-        const vec3 targetRed   = vec3(1.0, 40.0/255.0, 40.0/255.0);
-        const vec3 targetGreen = vec3(40.0/255.0, 1.0, 40.0/255.0);
-        const vec3 targetBlue  = vec3(40.0/255.0, 40.0/255.0, 1.0);
+        const vec3 targetRed   = vec3{QColor(UIColors.RED).getRgbF()[:3]};
+        const vec3 targetGreen = vec3{QColor(UIColors.GREEN).getRgbF()[:3]};
+        const vec3 targetBlue  = vec3{QColor(UIColors.BLUE).getRgbF()[:3]};
 
-        void main() {
+        void main() {{
             // Opposite directions are colored same
             float nx = abs(v_normal.x);
             float ny = abs(v_normal.y);
@@ -73,7 +75,7 @@ customNormalColor = ShaderProgram('customNormalColor', [
 
             vec3 blended_rgb = nx * targetRed + ny * targetGreen + nz * targetBlue;
             gl_FragColor = vec4(blended_rgb, 0.75);
-        }
+        }}
     """)
 ])
 
@@ -112,7 +114,7 @@ class CubeMesh(MeshData):
 
 
 class OpaqueCube(GLMeshItem):
-    def __init__(self, parentItem=None, size: float = 0, color=MColors.WHITE, shader="shaded", glOptions="opaque", *args, **kwargs):
+    def __init__(self, parentItem=None, size: float = 0, color=GLColors.WHITE, shader="shaded", glOptions="opaque", *args, **kwargs):
         self.size = size
 
         super().__init__(
@@ -197,7 +199,7 @@ class OpaqueCylinder(GLMeshItem):
                  radius=1.0, 
                  height=1.0, 
                  segments=32, 
-                 color=MColors.WHITE,
+                 color=GLColors.WHITE,
                  drawEdges=True,
                  drawFaces=False,
                  shader=customWorldLight,
@@ -234,7 +236,7 @@ class Cone(GLMeshItem):
         cols=32,
         radius: tuple=(0.2, 0), 
         length=1.0, 
-        color=MColors.WHITE,
+        color=GLColors.WHITE,
         drawEdges=True,
         drawFaces=False,
         shader=customWorldLight,

@@ -3,12 +3,12 @@ from typing import Iterable
 
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout 
 
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, TextItem, mkPen, mkBrush
 
 from modules.ui.data import EncoderPlotData
-from modules.ui.presets import Colors, TooltipLabel, FrameCounter
+from modules.ui.presets import UIColors, TooltipLabel, FrameCounter
 from modules.ui.plots import (
     DATA_QUEUE_SIZE,
     PLOT_TIME_STEPS,
@@ -37,42 +37,47 @@ class EncoderWidget(QWidget):
 
 class EncoderPlotStatsWidget(PlotStatsWidget):
     def __init__(self):
-        super().__init__()
+        super().__init__(QVBoxLayout)
         html_colored_number = "<span style='color: {}; font-weight: bold; font-family: Courier New, monospace;'>{{}}</span>"
         html_bold = "<span style='font-weight: bold;'>{}</span>"
 
         self.texts = {
-            "angle": f"Msr:{html_colored_number.format(Colors.GREEN)}",
-            "angle_change": f"Δ°:{html_colored_number.format(Colors.GREEN)}",
-            "magnitude_avg": f"Avg:{html_colored_number.format(Colors.ON_ACCENT)}",
-            "magnitude_avg_change": f"Δ:{html_colored_number.format(Colors.ON_ACCENT)}",
+            "angle": f"Msr:{html_colored_number.format(UIColors.GREEN)}",
+            "angle_change": f"Δ°:{html_colored_number.format(UIColors.GREEN)}",
+            "magnitude_avg": f"Avg:{html_colored_number.format(UIColors.ON_ACCENT)}",
+            "magnitude_avg_change": f"Δ :{html_colored_number.format(UIColors.ON_ACCENT)}",
         }
 
         angle_description_label = TooltipLabel(html_bold.format("Angle"))
         self.angle_label = TooltipLabel(self.texts["angle"].format("--"))
         self.angle_change_label = TooltipLabel(self.texts["angle_change"].format("--"))
 
-        magnitude_description_label = TooltipLabel(html_bold.format("Magnitude"))
+        magnitude_description_label = TooltipLabel(html_bold.format("Mag"))
         self.magnitude_avg_label = TooltipLabel(self.texts["magnitude_avg"].format("--"))
         self.magnitude_avg_change_label = TooltipLabel(
             self.texts["magnitude_avg_change"].format("--")
         )
 
-        self.layout.addWidget(angle_description_label)
-        self.layout.addWidget(self.angle_label)
-        self.layout.addWidget(self.angle_change_label)
-        self.layout.addStretch(1)
-        self.layout.addWidget(magnitude_description_label)
-        self.layout.addWidget(self.magnitude_avg_label)
-        self.layout.addWidget(self.magnitude_avg_change_label)
+        angle_layout = QHBoxLayout()
+        angle_layout.addWidget(angle_description_label)
+        angle_layout.addStretch(1)
+        angle_layout.addWidget(self.angle_label)
+        angle_layout.addWidget(self.angle_change_label)
+        mag_layout = QHBoxLayout()        
+        mag_layout.addWidget(magnitude_description_label)
+        mag_layout.addStretch(1)
+        mag_layout.addWidget(self.magnitude_avg_label)
+        mag_layout.addWidget(self.magnitude_avg_change_label)
+        self.layout.addLayout(angle_layout)
+        self.layout.addLayout(mag_layout)
 
     def update(
         self, angle_deg: float, angle_deg_change: float, mag_avg: float, mag_avg_change: float
     ):
         ang_str = "{:7.2f}".format(angle_deg).replace(" ", "&nbsp;")
         ang_change_str = "{:7.2f}".format(angle_deg_change).replace(" ", "&nbsp;")
-        mag_change_str = "{:6.2f}".format(mag_avg_change).replace(" ", "&nbsp;")
-        mag_str = "{:6.2f}".format(mag_avg).replace(" ", "&nbsp;")
+        mag_change_str = "{:7.2f}".format(mag_avg_change).replace(" ", "&nbsp;")
+        mag_str = "{:7.2f}".format(mag_avg).replace(" ", "&nbsp;")
 
         self.angle_label.setText(self.texts["angle"].format(ang_str))
         self.angle_change_label.setText(self.texts["angle_change"].format(ang_change_str))
@@ -86,11 +91,14 @@ class EncoderLinePlotWidget(PlotWidget):
     def __init__(self, name: str, *args, **kwargs):
         self.name = name
         super().__init__(*args, **kwargs)
-        self.setBackground(Colors.FOREGROUND)
+        self.setBackground(UIColors.FOREGROUND)
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setTitle(f"Angle [°] | Magnitude ({self.name})")
+        self.setAspectLocked(True)
+        self.setMinimumSize(300, 200)
+        
 
-        self._angle_color = Colors.GREEN
+        self._angle_color = UIColors.GREEN
 
         self._setup_axes()
         self._setup_legend()
@@ -102,7 +110,7 @@ class EncoderLinePlotWidget(PlotWidget):
     def _setup_axes(self):
         self.setYRange(1.5, -1.5, padding=0)
 
-        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.text_pen = mkPen(UIColors.ON_ACCENT)
         self.getAxis("left").setPen(self.text_pen)
         self.getAxis("left").setTextPen(self.text_pen)
 
@@ -113,8 +121,8 @@ class EncoderLinePlotWidget(PlotWidget):
     def _setup_legend(self):
         self.legend = self.getPlotItem().addLegend()
         self.legend.anchor(itemPos=(0, 0), parentPos=(0, 1), offset=(15, -35))
-        self.legend.setBrush(QBrush(QColor(Colors.ACCENT)))
-        self.legend.setPen(mkPen(color=Colors.ON_FOREGROUND, width=0.5))
+        self.legend.setBrush(QBrush(QColor(UIColors.ACCENT)))
+        self.legend.setPen(mkPen(color=UIColors.ON_FOREGROUND, width=0.5))
         self.legend.layout.setContentsMargins(3, 1, 3, 1)
         self.legend.setColumnCount(3)
 
@@ -129,7 +137,7 @@ class EncoderRadialPlotWidget(PlotWidget):
         self.name = name
 
         super().__init__(*args, **kwargs)
-        self.setBackground(Colors.FOREGROUND)
+        self.setBackground(UIColors.FOREGROUND)
         self.setAspectLocked(True)
         self.showGrid(x=True, y=True, alpha=0.3)
         self.setTitle(f"Angle [°] | Magnitude ({self.name})")
@@ -137,17 +145,16 @@ class EncoderRadialPlotWidget(PlotWidget):
         self._setup_axes()
         self._setup_reference_circle()
         self._setup_plots()
-        # self._setup_history_samples_color_brushes()
+        self._setup_history_samples_color_brushes()
 
     def update(self, radial_xs: np.ndarray, radial_ys: np.ndarray):
-        self.current_point.setData([radial_xs[-1]], [radial_ys[-1]])
-        self.points_fusion_freq.setData(x=radial_xs, y=radial_ys)
+        self._points.setData(x=radial_xs, y=radial_ys, brush=self._points_brushes)
 
     def _setup_axes(self):
         self.setYRange(-50, 50, padding=0)
         self.setXRange(-50, 50, padding=0)
 
-        self.text_pen = mkPen(Colors.ON_ACCENT)
+        self.text_pen = mkPen(UIColors.ON_ACCENT)
 
         self.getAxis("left").setPen(self.text_pen)
         self.getAxis("left").setTextPen(self.text_pen)
@@ -161,7 +168,7 @@ class EncoderRadialPlotWidget(PlotWidget):
         theta = np.linspace(0, 2 * np.pi, 30)
         x = radius * np.cos(theta)
         y = radius * np.sin(theta)
-        self.circle = PlotCurveItem(pen=mkPen(Colors.ON_ACCENT_DIM))
+        self.circle = PlotCurveItem(pen=mkPen(UIColors.ON_ACCENT_DIM))
         self.circle.setData(x=x, y=y)
         self.addItem(self.circle)
 
@@ -170,29 +177,29 @@ class EncoderRadialPlotWidget(PlotWidget):
             rad = np.deg2rad(angle)
             x = [0, radius * np.cos(rad)]
             y = [0, radius * np.sin(rad)]
-            line = PlotCurveItem(x=x, y=y, pen=mkPen(Colors.ON_ACCENT_DIM))
+            line = PlotCurveItem(x=x, y=y, pen=mkPen(UIColors.ON_ACCENT_DIM))
             self.addItem(line)
 
             # Grid line angle text
-            text = TextItem(str(angle), anchor=(0.5, 0.5), color=Colors.ON_ACCENT_DIM)
+            text = TextItem(str(angle), anchor=(0.5, 0.5), color=UIColors.ON_ACCENT_DIM)
             text_offset = radius + 10
             text.setPos(text_offset * np.cos(rad), text_offset * np.sin(rad))
             self.addItem(text)
 
     def _setup_plots(self):
-        self.current_point = ScatterPlotItem(size=10, pen=mkPen(Colors.GREEN, width=3))
+        self.current_point = ScatterPlotItem(size=10, pen=mkPen(UIColors.GREEN, width=3))
         self.addItem(self.current_point)
-        self.points_fusion_freq = ScatterPlotItem(size=5, pen=None)
-        self.addItem(self.points_fusion_freq)
+        self._points = ScatterPlotItem(size=5, pen=None)
+        self.addItem(self._points)
 
     def _setup_history_samples_color_brushes(self):
-        base_color_fusion_freq = QColor(Colors.GREEN)
-        base_color_fusion_freq.setAlpha(200)
-        self.color_brushes_fusion_freq = []
+        base_color = QColor(UIColors.ON_PRIMARY)
+        base_color.setAlpha(255)
+        self._points_brushes = []
 
-        for i in range(self.max_samples_fusion_freq):
-            i_color_ff = QColor(base_color_fusion_freq)
+        for i in range(EncoderPlotData.HISTORY_SIZE):
+            i_color_ff = QColor(base_color)
             i_color_ff.setAlpha(
-                int(base_color_fusion_freq.alpha() * i / self.max_samples_fusion_freq)
+                int(base_color.alpha() * i / EncoderPlotData.HISTORY_SIZE)
             )
-            self.color_brushes_fusion_freq.append(mkBrush(i_color_ff))
+            self._points_brushes.append(mkBrush(i_color_ff))
