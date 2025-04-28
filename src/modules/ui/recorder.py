@@ -35,9 +35,8 @@ class RecorderThread(QThread):
             self._record_writer.stop()
 
 class PlaybackThread(QThread):
-    def __init__(self, data_queue: SPMCQueue):
+    def __init__(self):
         super().__init__()
-        self.data_queue = data_queue
         self._is_running = False
         self._is_playing = False
         self._is_stopped = False

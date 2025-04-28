@@ -117,7 +117,7 @@ class TopToolBar(QToolBar):
         a.toggled.connect(toggle)
         return a
 
-    def handle_record_selected(self):
+    def on_record_selected(self):
         self.action_toggle_source.setChecked(True)
         self.source_toggled.emit(DataSource.RECORD)
 

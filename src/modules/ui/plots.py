@@ -3,14 +3,12 @@ import numpy as np
 from collections import deque
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QLinearGradient, QBrush, QVector3D
+from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame, QVBoxLayout
 
-from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen, mkBrush
+from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, mkPen
 import pyqtgraph as pg
-from pyqtgraph.opengl import GLViewWidget, GLLinePlotItem, GLGridItem
 
-from datalink.data import Rotation
 from modules.ui.presets import UIColors
 
 FPS = 30
@@ -265,122 +263,122 @@ class LatencyPlotWidget(QWidget):
             self.w_plot.setYRange(target_min, target_max, padding=0.05)
 
 
-class MapPlotWidget(PlotWidget):
-    DIR_LINE_LEN = 20
+# class MapPlotWidget(PlotWidget):
+#     DIR_LINE_LEN = 20
 
-    def __init__(self):
-        super().__init__()
-        self.setBackground(UIColors.FOREGROUND)
-        self.setAspectLocked(True)
-        self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
-        self.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
-        self.dir_x = PlotCurveItem(pen=mkPen("r", width=2))
-        self.dir_x.setZValue(1)
-        self.dir_y = PlotCurveItem(pen=mkPen("g", width=2))
-        self.dir_y.setZValue(1)
-        self.addItem(self.dir_x)
-        self.addItem(self.dir_y)
+#     def __init__(self):
+#         super().__init__()
+#         self.setBackground(UIColors.FOREGROUND)
+#         self.setAspectLocked(True)
+#         self.getPlotItem().showGrid(x=True, y=True, alpha=0.25)
+#         self.getPlotItem().setTitle("Vehicle Position (X, Y, Yaw)")
+#         self.dir_x = PlotCurveItem(pen=mkPen("r", width=2))
+#         self.dir_x.setZValue(1)
+#         self.dir_y = PlotCurveItem(pen=mkPen("g", width=2))
+#         self.dir_y.setZValue(1)
+#         self.addItem(self.dir_x)
+#         self.addItem(self.dir_y)
 
-        self.x_deque = deque(maxlen=DATA_QUEUE_SIZE)
-        self.y_deque = deque(maxlen=DATA_QUEUE_SIZE)
+#         self.x_deque = deque(maxlen=DATA_QUEUE_SIZE)
+#         self.y_deque = deque(maxlen=DATA_QUEUE_SIZE)
 
-        self.path = PlotCurveItem(pen=mkPen(QColor(255, 255, 255, 255), width=2, style=Qt.DashLine))
-        gradient = QLinearGradient(0, 0, 0, 1)
-        gradient.setColorAt(0, QColor(255, 255, 255, 255))
-        gradient.setColorAt(1, QColor(255, 255, 255, 64))
-        self.path.setBrush(QBrush(gradient))
-        self.addItem(self.path)
+#         self.path = PlotCurveItem(pen=mkPen(QColor(255, 255, 255, 255), width=2, style=Qt.DashLine))
+#         gradient = QLinearGradient(0, 0, 0, 1)
+#         gradient.setColorAt(0, QColor(255, 255, 255, 255))
+#         gradient.setColorAt(1, QColor(255, 255, 255, 64))
+#         self.path.setBrush(QBrush(gradient))
+#         self.addItem(self.path)
 
-    def update(self, x: float, y: float, yaw: float):
-        dx = MapPlotWidget.DIR_LINE_LEN * np.cos(np.radians(yaw))
-        dy = MapPlotWidget.DIR_LINE_LEN * np.sin(np.radians(yaw))
-        self.dir_x.setData([x, x + dx], [y, y + dy])
-        self.dir_y.setData([x, x - dy], [y, y + dx])
-        self.x_deque.append(x)
-        self.y_deque.append(y)
-        self.path.setData(list(self.x_deque), list(self.y_deque))
+#     def update(self, x: float, y: float, yaw: float):
+#         dx = MapPlotWidget.DIR_LINE_LEN * np.cos(np.radians(yaw))
+#         dy = MapPlotWidget.DIR_LINE_LEN * np.sin(np.radians(yaw))
+#         self.dir_x.setData([x, x + dx], [y, y + dy])
+#         self.dir_y.setData([x, x - dy], [y, y + dx])
+#         self.x_deque.append(x)
+#         self.y_deque.append(y)
+#         self.path.setData(list(self.x_deque), list(self.y_deque))
 
 
-class IMUPlotWidget(GLViewWidget):
-    def __init__(self):
-        super().__init__()
-        self.setSizePolicy(self.sizePolicy())
-        self.setBackgroundColor(UIColors.FOREGROUND)
-        self.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
+# class IMUPlotWidget(GLViewWidget):
+#     def __init__(self):
+#         super().__init__()
+#         self.setSizePolicy(self.sizePolicy())
+#         self.setBackgroundColor(UIColors.FOREGROUND)
+#         self.setCameraPosition(pos=QVector3D(0, 0, 0), distance=10, azimuth=225)
 
-        # Create the arrows using GLLinePlotItem
-        self.arrow_x = GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [1, 0, 0]]), color=(1, 0, 0, 1), width=3
-        )
-        self.arrow_y = GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [0, 1, 0]]), color=(0, 1, 0, 1), width=3
-        )
-        self.arrow_z = GLLinePlotItem(
-            pos=np.array([[0, 0, 0], [0, 0, 1]]), color=(0, 0, 1, 1), width=3
-        )
-        self.addItem(self.arrow_x)
-        self.addItem(self.arrow_y)
-        self.addItem(self.arrow_z)
+#         # Create the arrows using GLLinePlotItem
+#         self.arrow_x = GLLinePlotItem(
+#             pos=np.array([[0, 0, 0], [1, 0, 0]]), color=(1, 0, 0, 1), width=3
+#         )
+#         self.arrow_y = GLLinePlotItem(
+#             pos=np.array([[0, 0, 0], [0, 1, 0]]), color=(0, 1, 0, 1), width=3
+#         )
+#         self.arrow_z = GLLinePlotItem(
+#             pos=np.array([[0, 0, 0], [0, 0, 1]]), color=(0, 0, 1, 1), width=3
+#         )
+#         self.addItem(self.arrow_x)
+#         self.addItem(self.arrow_y)
+#         self.addItem(self.arrow_z)
 
-        # Add axis labels using GLLinePlotItem
-        x_label = GLLinePlotItem(
-            pos=np.array([[1, 0, 0], [1.1, 0, 0]]), color=(1, 0, 0, 1), width=3
-        )
-        y_label = GLLinePlotItem(
-            pos=np.array([[0, 1, 0], [0, 1.1, 0]]), color=(0, 1, 0, 1), width=3
-        )
-        z_label = GLLinePlotItem(
-            pos=np.array([[0, 0, 1], [0, 0, 1.1]]), color=(0, 0, 1, 1), width=3
-        )
-        self.addItem(x_label)
-        self.addItem(y_label)
-        self.addItem(z_label)
+#         # Add axis labels using GLLinePlotItem
+#         x_label = GLLinePlotItem(
+#             pos=np.array([[1, 0, 0], [1.1, 0, 0]]), color=(1, 0, 0, 1), width=3
+#         )
+#         y_label = GLLinePlotItem(
+#             pos=np.array([[0, 1, 0], [0, 1.1, 0]]), color=(0, 1, 0, 1), width=3
+#         )
+#         z_label = GLLinePlotItem(
+#             pos=np.array([[0, 0, 1], [0, 0, 1.1]]), color=(0, 0, 1, 1), width=3
+#         )
+#         self.addItem(x_label)
+#         self.addItem(y_label)
+#         self.addItem(z_label)
 
-        grid = GLGridItem()
-        grid.setSize(x=10, y=10, z=10)
-        self.addItem(grid)
+#         grid = GLGridItem()
+#         grid.setSize(x=10, y=10, z=10)
+#         self.addItem(grid)
 
-    def update_data(self, rotation: Rotation):
-        roll, pitch, yaw = (
-            np.deg2rad(rotation.roll),
-            np.deg2rad(rotation.pitch),
-            np.deg2rad(rotation.yaw),
-        )
-        # Create rotation matrices
-        Rx = np.array(
-            [
-                [1, 0, 0, 0],
-                [0, np.cos(roll), -np.sin(roll), 0],
-                [0, np.sin(roll), np.cos(roll), 0],
-                [0, 0, 0, 1],
-            ]
-        )
+#     def update_data(self, rotation: Rotation):
+#         roll, pitch, yaw = (
+#             np.deg2rad(rotation.roll),
+#             np.deg2rad(rotation.pitch),
+#             np.deg2rad(rotation.yaw),
+#         )
+#         # Create rotation matrices
+#         Rx = np.array(
+#             [
+#                 [1, 0, 0, 0],
+#                 [0, np.cos(roll), -np.sin(roll), 0],
+#                 [0, np.sin(roll), np.cos(roll), 0],
+#                 [0, 0, 0, 1],
+#             ]
+#         )
 
-        Ry = np.array(
-            [
-                [np.cos(pitch), 0, np.sin(pitch), 0],
-                [0, 1, 0, 0],
-                [-np.sin(pitch), 0, np.cos(pitch), 0],
-                [0, 0, 0, 1],
-            ]
-        )
+#         Ry = np.array(
+#             [
+#                 [np.cos(pitch), 0, np.sin(pitch), 0],
+#                 [0, 1, 0, 0],
+#                 [-np.sin(pitch), 0, np.cos(pitch), 0],
+#                 [0, 0, 0, 1],
+#             ]
+#         )
 
-        Rz = np.array(
-            [
-                [np.cos(yaw), -np.sin(yaw), 0, 0],
-                [np.sin(yaw), np.cos(yaw), 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]
-        )
+#         Rz = np.array(
+#             [
+#                 [np.cos(yaw), -np.sin(yaw), 0, 0],
+#                 [np.sin(yaw), np.cos(yaw), 0, 0],
+#                 [0, 0, 1, 0],
+#                 [0, 0, 0, 1],
+#             ]
+#         )
 
-        # Combined rotation matrix
-        R = Rz @ Ry @ Rx
+#         # Combined rotation matrix
+#         R = Rz @ Ry @ Rx
 
-        # Update arrow orientations
-        self.arrow_x.setTransform(R)
-        self.arrow_y.setTransform(R)
-        self.arrow_z.setTransform(R)
+#         # Update arrow orientations
+#         self.arrow_x.setTransform(R)
+#         self.arrow_y.setTransform(R)
+#         self.arrow_z.setTransform(R)
 
 
 # class EncoderPlotWidget(PlotWidget):
@@ -423,275 +421,275 @@ class IMUPlotWidget(GLViewWidget):
 #         # self.plt_curve.setData(x=x_values, y=y_values)
 
 
-class EncoderPlotWidget(QWidget):
-    def __init__(self, name: str):
-        super().__init__()
-        self.main_layout = QVBoxLayout(self)
+# class EncoderPlotWidget(QWidget):
+#     def __init__(self, name: str):
+#         super().__init__()
+#         self.main_layout = QVBoxLayout(self)
 
-        self.plot_container = QWidget()
-        self.plot_layout = QHBoxLayout(self.plot_container)
+#         self.plot_container = QWidget()
+#         self.plot_layout = QHBoxLayout(self.plot_container)
 
-        self.polar_plot = PlotWidget()
-        self.polar_plot.setBackground(UIColors.FOREGROUND)
-        self.polar_plot.setAspectLocked(True)
-        self.polar_plot.showGrid(x=True, y=True, alpha=0.5)
-        self.polar_plot.setTitle(f"{name} - Position")
+#         self.polar_plot = PlotWidget()
+#         self.polar_plot.setBackground(UIColors.FOREGROUND)
+#         self.polar_plot.setAspectLocked(True)
+#         self.polar_plot.showGrid(x=True, y=True, alpha=0.5)
+#         self.polar_plot.setTitle(f"{name} - Position")
 
-        # Add plots to layout
-        self.plot_layout.addWidget(self.polar_plot, 1)
+#         # Add plots to layout
+#         self.plot_layout.addWidget(self.polar_plot, 1)
 
-        # Setup stats display
-        self.stats_widget = QFrame()
-        self.stats_widget.setStyleSheet(
-            f"""
-            background-color: {UIColors.ACCENT};
-            color: {UIColors.ON_ACCENT};
-            border-radius: 2px;
-            padding: 2px;
-        """
-        )
-        self.stats_layout = QHBoxLayout(self.stats_widget)
-        self.stats_layout.setContentsMargins(5, 2, 5, 2)
+#         # Setup stats display
+#         self.stats_widget = QFrame()
+#         self.stats_widget.setStyleSheet(
+#             f"""
+#             background-color: {UIColors.ACCENT};
+#             color: {UIColors.ON_ACCENT};
+#             border-radius: 2px;
+#             padding: 2px;
+#         """
+#         )
+#         self.stats_layout = QHBoxLayout(self.stats_widget)
+#         self.stats_layout.setContentsMargins(5, 2, 5, 2)
 
-        # Create stats labels
-        self.mag_avg_label = QLabel("Mag Avg: 0.00")
-        self.mag_std_label = QLabel("Std: 0.00")
-        self.angle_stability_label = QLabel("Angle Std: 0.00°")
-        self.pos_label = QLabel("Pos: 0°")
-        self.pos_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+#         # Create stats labels
+#         self.mag_avg_label = QLabel("Mag Avg: 0.00")
+#         self.mag_std_label = QLabel("Std: 0.00")
+#         self.angle_stability_label = QLabel("Angle Std: 0.00°")
+#         self.pos_label = QLabel("Pos: 0°")
+#         self.pos_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        # Add stats to layout
-        self.stats_layout.addWidget(self.mag_avg_label)
-        self.stats_layout.addWidget(self.mag_std_label)
-        self.stats_layout.addWidget(self.angle_stability_label)
-        self.stats_layout.addStretch(1)
-        self.stats_layout.addWidget(self.pos_label)
+#         # Add stats to layout
+#         self.stats_layout.addWidget(self.mag_avg_label)
+#         self.stats_layout.addWidget(self.mag_std_label)
+#         self.stats_layout.addWidget(self.angle_stability_label)
+#         self.stats_layout.addStretch(1)
+#         self.stats_layout.addWidget(self.pos_label)
 
-        # Add widgets to main layout
-        self.main_layout.addWidget(self.plot_container, stretch=1)
-        self.main_layout.addWidget(self.stats_widget)
+#         # Add widgets to main layout
+#         self.main_layout.addWidget(self.plot_container, stretch=1)
+#         self.main_layout.addWidget(self.stats_widget)
 
-        # Initialize plot items
-        self.text_pen = mkPen(UIColors.ON_ACCENT)
-        self.configure_axes(self.polar_plot)
+#         # Initialize plot items
+#         self.text_pen = mkPen(UIColors.ON_ACCENT)
+#         self.configure_axes(self.polar_plot)
 
-        # Circle for reference
-        self.circle = pg.ScatterPlotItem(size=1, pen=mkPen(UIColors.ON_FOREGROUND_DIM), brush=None)
-        initial_circle_radius = 35
-        self.draw_reference_circle(initial_circle_radius)
-        self.polar_plot.addItem(self.circle)
+#         # Circle for reference
+#         self.circle = pg.ScatterPlotItem(size=1, pen=mkPen(UIColors.ON_FOREGROUND_DIM), brush=None)
+#         initial_circle_radius = 35
+#         self.draw_reference_circle(initial_circle_radius)
+#         self.polar_plot.addItem(self.circle)
 
-        # Grid lines (radial)
-        for angle in range(0, 360, 30):
-            rad = np.deg2rad(angle)
-            x = [0, initial_circle_radius * np.cos(rad)]
-            y = [0, initial_circle_radius * np.sin(rad)]
-            line = pg.PlotCurveItem(
-                x=x, y=y, pen=mkPen(UIColors.ON_FOREGROUND_DIM, width=0.5, style=Qt.DotLine)
-            )
-            self.polar_plot.addItem(line)
+#         # Grid lines (radial)
+#         for angle in range(0, 360, 30):
+#             rad = np.deg2rad(angle)
+#             x = [0, initial_circle_radius * np.cos(rad)]
+#             y = [0, initial_circle_radius * np.sin(rad)]
+#             line = pg.PlotCurveItem(
+#                 x=x, y=y, pen=mkPen(UIColors.ON_FOREGROUND_DIM, width=0.5, style=Qt.DotLine)
+#             )
+#             self.polar_plot.addItem(line)
 
-            # Add angle labels
-            text = pg.TextItem(str(angle), anchor=(0.5, 0.5), color=UIColors.ON_ACCENT)
-            text_offset = initial_circle_radius + 15
-            text.setPos(text_offset * np.cos(rad), text_offset * np.sin(rad))
-            self.polar_plot.addItem(text)
+#             # Add angle labels
+#             text = pg.TextItem(str(angle), anchor=(0.5, 0.5), color=UIColors.ON_ACCENT)
+#             text_offset = initial_circle_radius + 15
+#             text.setPos(text_offset * np.cos(rad), text_offset * np.sin(rad))
+#             self.polar_plot.addItem(text)
 
-        # Current point highlight
-        self.current_point = ScatterPlotItem(
-            size=10, pen=mkPen(UIColors.GREEN, width=2), brush=mkBrush(UIColors.FOREGROUND)
-        )
-        self.polar_plot.addItem(self.current_point)
+#         # Current point highlight
+#         self.current_point = ScatterPlotItem(
+#             size=10, pen=mkPen(UIColors.GREEN, width=2), brush=mkBrush(UIColors.FOREGROUND)
+#         )
+#         self.polar_plot.addItem(self.current_point)
 
-        # Points with color gradient
-        self.points = ScatterPlotItem(size=5, pen=None)
-        self.polar_plot.addItem(self.points)
+#         # Points with color gradient
+#         self.points = ScatterPlotItem(size=5, pen=None)
+#         self.polar_plot.addItem(self.points)
 
-        # Data storage
-        self.max_samples = 50
-        self.angles = np.zeros(self.max_samples)
-        self.magnitudes = np.zeros(self.max_samples)
-        self.x_values = np.zeros(self.max_samples)
-        self.y_values = np.zeros(self.max_samples)
-        self.sample_indices = np.arange(self.max_samples)
-        self.next_idx = 0
-        self.data_count = 0
+#         # Data storage
+#         self.max_samples = 50
+#         self.angles = np.zeros(self.max_samples)
+#         self.magnitudes = np.zeros(self.max_samples)
+#         self.x_values = np.zeros(self.max_samples)
+#         self.y_values = np.zeros(self.max_samples)
+#         self.sample_indices = np.arange(self.max_samples)
+#         self.next_idx = 0
+#         self.data_count = 0
 
-        # Pre-compute color brushes for efficiency
-        self.color_brushes = [
-            pg.mkBrush(0, 100, 200, int(255 * i / self.max_samples))
-            for i in range(self.max_samples)
-        ]
+#         # Pre-compute color brushes for efficiency
+#         self.color_brushes = [
+#             pg.mkBrush(0, 100, 200, int(255 * i / self.max_samples))
+#             for i in range(self.max_samples)
+#         ]
 
-        # Track update counter for throttling non-critical updates
-        self.update_counter = 0
+#         # Track update counter for throttling non-critical updates
+#         self.update_counter = 0
 
-        # Pre-compute angle positions for the polar plot
-        theta = np.linspace(0, 2 * np.pi, 100)
-        self.circle_x = np.cos(theta)
-        self.circle_y = np.sin(theta)
+#         # Pre-compute angle positions for the polar plot
+#         theta = np.linspace(0, 2 * np.pi, 100)
+#         self.circle_x = np.cos(theta)
+#         self.circle_y = np.sin(theta)
 
-        # Initialize rolling stats
-        self.rolling_sum = 0
-        self.rolling_sum_sq = 0
+#         # Initialize rolling stats
+#         self.rolling_sum = 0
+#         self.rolling_sum_sq = 0
 
-    def configure_axes(self, plot):
-        plot.getAxis("left").setPen(self.text_pen)
-        plot.getAxis("left").setTextPen(self.text_pen)
-        plot.getAxis("bottom").setPen(self.text_pen)
-        plot.getAxis("bottom").setTextPen(self.text_pen)
+#     def configure_axes(self, plot):
+#         plot.getAxis("left").setPen(self.text_pen)
+#         plot.getAxis("left").setTextPen(self.text_pen)
+#         plot.getAxis("bottom").setPen(self.text_pen)
+#         plot.getAxis("bottom").setTextPen(self.text_pen)
 
-    def draw_reference_circle(self, radius):
-        theta = np.linspace(0, 2 * np.pi, 100)
-        x = radius * np.cos(theta)
-        y = radius * np.sin(theta)
-        self.circle.setData(x=x, y=y)
+#     def draw_reference_circle(self, radius):
+#         theta = np.linspace(0, 2 * np.pi, 100)
+#         x = radius * np.cos(theta)
+#         y = radius * np.sin(theta)
+#         self.circle.setData(x=x, y=y)
 
-    def update(self, data_items):
-        """Update widget with multiple encoder data items
+#     def update(self, data_items):
+#         """Update widget with multiple encoder data items
 
-        Args:
-            data_items: Iterable of EncoderData objects
-        """
-        # Skip if empty data
-        if not data_items:
-            return
+#         Args:
+#             data_items: Iterable of EncoderData objects
+#         """
+#         # Skip if empty data
+#         if not data_items:
+#             return
 
-        # Process all data items in batch
-        for data in data_items:
-            # Convert encoder data
-            deg = data.position * ENCODER_RAW2DEG
-            rad = np.deg2rad(deg)
-            x = data.magnitude * np.cos(rad)
-            y = data.magnitude * np.sin(rad)
+#         # Process all data items in batch
+#         for data in data_items:
+#             # Convert encoder data
+#             deg = data.position * ENCODER_RAW2DEG
+#             rad = np.deg2rad(deg)
+#             x = data.magnitude * np.cos(rad)
+#             y = data.magnitude * np.sin(rad)
 
-            # Update rolling stats
-            if self.data_count >= self.max_samples:
-                # Remove oldest value from stats
-                old_mag = self.magnitudes[self.next_idx]
-                self.rolling_sum -= old_mag
-                self.rolling_sum_sq -= old_mag * old_mag
+#             # Update rolling stats
+#             if self.data_count >= self.max_samples:
+#                 # Remove oldest value from stats
+#                 old_mag = self.magnitudes[self.next_idx]
+#                 self.rolling_sum -= old_mag
+#                 self.rolling_sum_sq -= old_mag * old_mag
 
-            # Add new value to stats
-            self.rolling_sum += data.magnitude
-            self.rolling_sum_sq += data.magnitude * data.magnitude
+#             # Add new value to stats
+#             self.rolling_sum += data.magnitude
+#             self.rolling_sum_sq += data.magnitude * data.magnitude
 
-            # Store data in circular buffer
-            self.angles[self.next_idx] = deg
-            self.magnitudes[self.next_idx] = data.magnitude
-            self.x_values[self.next_idx] = x
-            self.y_values[self.next_idx] = y
+#             # Store data in circular buffer
+#             self.angles[self.next_idx] = deg
+#             self.magnitudes[self.next_idx] = data.magnitude
+#             self.x_values[self.next_idx] = x
+#             self.y_values[self.next_idx] = y
 
-            # Update indices
-            self.next_idx = (self.next_idx + 1) % self.max_samples
-            self.data_count = min(self.data_count + 1, self.max_samples)
+#             # Update indices
+#             self.next_idx = (self.next_idx + 1) % self.max_samples
+#             self.data_count = min(self.data_count + 1, self.max_samples)
 
-        # Always update critical elements - use the last data point for current position
-        self.current_point.setData([x], [y])
-        self.pos_label.setText(f"Pos: {deg:.1f}°")
+#         # Always update critical elements - use the last data point for current position
+#         self.current_point.setData([x], [y])
+#         self.pos_label.setText(f"Pos: {deg:.1f}°")
 
-        # Throttle remaining updates to reduce CPU usage
-        self.update_counter += 1
-        if self.update_counter % 3 != 0:
-            return
+#         # Throttle remaining updates to reduce CPU usage
+#         self.update_counter += 1
+#         if self.update_counter % 3 != 0:
+#             return
 
-        # Calculate indices efficiently
-        if self.data_count < self.max_samples:
-            valid_indices = slice(0, self.data_count)
-            x_plot = self.x_values[valid_indices]
-            y_plot = self.y_values[valid_indices]
-            mags = self.magnitudes[valid_indices]
-            angs = self.angles[valid_indices]
-        else:
-            # When buffer is full, we need to handle the wrap-around
-            x_plot = np.empty(self.max_samples)
-            y_plot = np.empty(self.max_samples)
-            mags = np.empty(self.max_samples)
-            angs = np.empty(self.max_samples)
+#         # Calculate indices efficiently
+#         if self.data_count < self.max_samples:
+#             valid_indices = slice(0, self.data_count)
+#             x_plot = self.x_values[valid_indices]
+#             y_plot = self.y_values[valid_indices]
+#             mags = self.magnitudes[valid_indices]
+#             angs = self.angles[valid_indices]
+#         else:
+#             # When buffer is full, we need to handle the wrap-around
+#             x_plot = np.empty(self.max_samples)
+#             y_plot = np.empty(self.max_samples)
+#             mags = np.empty(self.max_samples)
+#             angs = np.empty(self.max_samples)
 
-            # Copy first segment (from next_idx to end)
-            segment1_len = self.max_samples - self.next_idx
-            if segment1_len > 0:
-                x_plot[:segment1_len] = self.x_values[self.next_idx :]
-                y_plot[:segment1_len] = self.y_values[self.next_idx :]
-                mags[:segment1_len] = self.magnitudes[self.next_idx :]
-                angs[:segment1_len] = self.angles[self.next_idx :]
+#             # Copy first segment (from next_idx to end)
+#             segment1_len = self.max_samples - self.next_idx
+#             if segment1_len > 0:
+#                 x_plot[:segment1_len] = self.x_values[self.next_idx :]
+#                 y_plot[:segment1_len] = self.y_values[self.next_idx :]
+#                 mags[:segment1_len] = self.magnitudes[self.next_idx :]
+#                 angs[:segment1_len] = self.angles[self.next_idx :]
 
-            # Copy second segment (from start to next_idx)
-            if self.next_idx > 0:
-                x_plot[segment1_len:] = self.x_values[: self.next_idx]
-                y_plot[segment1_len:] = self.y_values[: self.next_idx]
-                mags[segment1_len:] = self.magnitudes[: self.next_idx]
-                angs[segment1_len:] = self.angles[: self.next_idx]
+#             # Copy second segment (from start to next_idx)
+#             if self.next_idx > 0:
+#                 x_plot[segment1_len:] = self.x_values[: self.next_idx]
+#                 y_plot[segment1_len:] = self.y_values[: self.next_idx]
+#                 mags[segment1_len:] = self.magnitudes[: self.next_idx]
+#                 angs[segment1_len:] = self.angles[: self.next_idx]
 
-        # Update path line and points (less critical)
-        self.points.setData(x=x_plot, y=y_plot, brush=self.color_brushes[: len(x_plot)])
+#         # Update path line and points (less critical)
+#         self.points.setData(x=x_plot, y=y_plot, brush=self.color_brushes[: len(x_plot)])
 
-        # Handle angle wraparound vectorized
-        if len(angs) > 1:
-            plot_angles = angs.copy()
-            # Convert to complex numbers for efficient circular distance calculation
-            z = np.exp(1j * np.deg2rad(plot_angles))
-            # Calculate phase differences
-            diffs = np.angle(z[1:] / z[:-1])
-            # Find jumps and apply corrections
-            for i in np.where(np.abs(diffs) > np.pi)[0]:
-                if diffs[i] > 0:
-                    plot_angles[i + 1 :] -= 360
-                else:
-                    plot_angles[i + 1 :] += 360
+#         # Handle angle wraparound vectorized
+#         if len(angs) > 1:
+#             plot_angles = angs.copy()
+#             # Convert to complex numbers for efficient circular distance calculation
+#             z = np.exp(1j * np.deg2rad(plot_angles))
+#             # Calculate phase differences
+#             diffs = np.angle(z[1:] / z[:-1])
+#             # Find jumps and apply corrections
+#             for i in np.where(np.abs(diffs) > np.pi)[0]:
+#                 if diffs[i] > 0:
+#                     plot_angles[i + 1 :] -= 360
+#                 else:
+#                     plot_angles[i + 1 :] += 360
 
-        # Calculate statistics efficiently using rolling values
-        if self.data_count >= 3:
-            mag_avg = self.rolling_sum / self.data_count
-            mag_var = (self.rolling_sum_sq / self.data_count) - (mag_avg * mag_avg)
-            mag_std = np.sqrt(max(0, mag_var))
+#         # Calculate statistics efficiently using rolling values
+#         if self.data_count >= 3:
+#             mag_avg = self.rolling_sum / self.data_count
+#             mag_var = (self.rolling_sum_sq / self.data_count) - (mag_avg * mag_avg)
+#             mag_std = np.sqrt(max(0, mag_var))
 
-            # Only calculate angular std periodically
-            if self.update_counter % 10 == 0:
-                angle_std = self.calculate_angular_std(angs)
-                self.angle_stability_label.setText(f"Angle Std: {angle_std:.2f}°")
+#             # Only calculate angular std periodically
+#             if self.update_counter % 10 == 0:
+#                 angle_std = self.calculate_angular_std(angs)
+#                 self.angle_stability_label.setText(f"Angle Std: {angle_std:.2f}°")
 
-            self.mag_avg_label.setText(f"Mag Avg: {mag_avg:.2f}")
-            self.mag_std_label.setText(f"Std: {mag_std:.2f}")
+#             self.mag_avg_label.setText(f"Mag Avg: {mag_avg:.2f}")
+#             self.mag_std_label.setText(f"Std: {mag_std:.2f}")
 
-        # Auto scale occasionally
-        if self.update_counter % 20 == 0:
-            self._update_scales()
+#         # Auto scale occasionally
+#         if self.update_counter % 20 == 0:
+#             self._update_scales()
 
-    def calculate_angular_std(self, angles):
-        """Calculate standard deviation for circular data"""
-        # Convert to radians
-        rad_angles = np.deg2rad(angles)
+#     def calculate_angular_std(self, angles):
+#         """Calculate standard deviation for circular data"""
+#         # Convert to radians
+#         rad_angles = np.deg2rad(angles)
 
-        # Convert to unit vectors
-        x = np.cos(rad_angles)
-        y = np.sin(rad_angles)
+#         # Convert to unit vectors
+#         x = np.cos(rad_angles)
+#         y = np.sin(rad_angles)
 
-        # Calculate mean direction
-        x_mean = np.mean(x)
-        y_mean = np.mean(y)
+#         # Calculate mean direction
+#         x_mean = np.mean(x)
+#         y_mean = np.mean(y)
 
-        # Calculate circular standard deviation
-        r = np.sqrt(x_mean**2 + y_mean**2)
-        circular_std = np.sqrt(-2 * np.log(r))
+#         # Calculate circular standard deviation
+#         r = np.sqrt(x_mean**2 + y_mean**2)
+#         circular_std = np.sqrt(-2 * np.log(r))
 
-        # Convert back to degrees
-        return np.rad2deg(circular_std)
+#         # Convert back to degrees
+#         return np.rad2deg(circular_std)
 
-    def _update_scales(self):
-        """Update plot scales based on data - optimized version"""
-        if self.data_count < 3:
-            return
+#     def _update_scales(self):
+#         """Update plot scales based on data - optimized version"""
+#         if self.data_count < 3:
+#             return
 
-        if self.data_count < self.max_samples:
-            max_magnitude = np.max(self.magnitudes[: self.data_count]) * 1.1
-        else:
-            max_magnitude = np.max(self.magnitudes) * 1.1
+#         if self.data_count < self.max_samples:
+#             max_magnitude = np.max(self.magnitudes[: self.data_count]) * 1.1
+#         else:
+#             max_magnitude = np.max(self.magnitudes) * 1.1
 
-        # Update polar plot
-        self.polar_plot.setXRange(-max_magnitude, max_magnitude)
-        self.polar_plot.setYRange(-max_magnitude, max_magnitude)
+#         # Update polar plot
+#         self.polar_plot.setXRange(-max_magnitude, max_magnitude)
+#         self.polar_plot.setYRange(-max_magnitude, max_magnitude)
 
-        # Update reference circle - reuse pre-computed sin/cos values
-        self.circle.setData(x=self.circle_x * max_magnitude, y=self.circle_y * max_magnitude)
+#         # Update reference circle - reuse pre-computed sin/cos values
+#         self.circle.setData(x=self.circle_x * max_magnitude, y=self.circle_y * max_magnitude)

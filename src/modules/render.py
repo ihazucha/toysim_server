@@ -1,4 +1,5 @@
 import sys
+
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6 import QtGui
@@ -15,77 +16,42 @@ from PySide6.QtWidgets import (
 )
 
 from modules.ui.plots import (
-    MapPlotWidget,
     LatencyPlotWidget,
 )
-from modules.ui.widgets.long_control import LongitudinalControlWidget
-from modules.ui.widgets.lat_control import LateralControlWidget
+# from modules.ui.widgets.long_control import LongitudinalControlWidget
+# from modules.ui.widgets.lat_control import LateralControlWidget
 from modules.ui.widgets.encoder import EncoderWidget
 from modules.ui.presets import UIColors
-from modules.ui.widgets.map3d import Map3D
+# from modules.ui.widgets.map3d import Map3D
 from modules.ui.widgets.imu3d import IMU3D
 from modules.ui.widgets.imu import IMURawWidget
 
-from modules.messaging import messaging
 from utils.paths import icon_path
-
+from utils.env import pdebug
+from modules.messaging import messaging
 from modules.ui.sidebar import RecordsSidebar
 from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.toolbar import TopToolBar
 from modules.ui.config import ConfigSidebar
 from modules.ui.data import SimDataThread, RealDataThread, QSimData, QRealData
-from modules.ui.presets import Fonts, FitGraphicsView, APP_STYLE
+from modules.ui.presets import Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
 from modules.ui.settings import WindowSettings
+from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QDockWidget
 
-import time
 
-# Disable VSYNC (significant FPS boost)
+# Global config
+# -------------------------------------------------------------------------------------------------
+
+# Disable VSync (significant FPS boost)
 sfmt = QtGui.QSurfaceFormat()
 sfmt.setSwapInterval(0)
 QtGui.QSurfaceFormat.setDefaultFormat(sfmt)
-
-# Utils
-# -------------------------------------------------------------------------------------------------
-
-
-def toggle_widget(w: QWidget):
-    w.close() if w.isVisible() else w.show()
-
 
 # UI
 # -------------------------------------------------------------------------------------------------
 
 
-class EMALatencyLabel(QLabel):
-    """Exponential Moving Average latency measurement"""
-
-    def __init__(self, name: str, label_update_freq=120):
-        self._name = name
-        self._label_update_freq = label_update_freq
-
-        super().__init__(f"{self._name} FPS: --")
-        self.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
-
-        self._last_time = time.perf_counter()
-        self._avg_dt = self._last_time
-        self._counter = 0
-        self.alpha = 0.2
-
-    def update(self):
-        t = time.perf_counter()
-        dt = t - self._last_time
-        self._avg_dt = (1 - self.alpha) * self._avg_dt + self.alpha * dt
-        if self._counter == 0:
-            self.setText(
-                f"{self._name}: <span style='font-weight: bold'>{self._avg_dt:.3f}</span> "
-                f"(<span style='font-weight: bold'>{int(1/self._avg_dt)}</span>)"
-            )
-        self._last_time = t
-        self._counter = (self._counter + 1) % self._label_update_freq
-
-
 class RendererMainWindow(QMainWindow):
-    init_complete = Signal()
     tab_changed = Signal(int, str)
 
     def __init__(self):
@@ -99,77 +65,102 @@ class RendererMainWindow(QMainWindow):
         event.accept()
 
     def init(self):
-        self.setStyleSheet(
-            f"""
-            QMainWindow {{
-                background-color: {UIColors.PRIMARY};
-            }}
-        """
-        )
-        self.setWindowTitle("ToySim UI")
-        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
-
-        self._init_tabs()
+        # Widgets
+        self.tabs = self._init_tabs()
         self.config_sidebar = self._init_config_sidebar()
         self.records_sidebar = self._init_records_sidebar()
         self.top_tool_bar = self._init_top_toolbar(self.config_sidebar, self.records_sidebar)
+        self.playback_bar = self._init_playback_bar()
         self._init_status_bar()
 
+        # Setup
+        self.setWindowTitle("ToySim UI")
+        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
+        self.setCentralWidget(self.tabs)
         self.showNormal()
-        self.init_complete.emit()
+
+        # Signals
+        self.records_sidebar.record_selected.connect(self.top_tool_bar.on_record_selected)
+        self.records_sidebar.record_selected.connect(lambda: toggle_widget(self.playback_bar))
 
     def _init_records_sidebar(self):
-        records_sidebar = RecordsSidebar(self)
-        self.addDockWidget(Qt.LeftDockWidgetArea, records_sidebar)
-        return records_sidebar
+        rsb = RecordsSidebar(self)
+        self.addDockWidget(Qt.LeftDockWidgetArea, rsb)
+        return rsb
 
     def _init_config_sidebar(self):
-        config_sidebar = ConfigSidebar(self)
-        self.addDockWidget(Qt.RightDockWidgetArea, config_sidebar)
-        return config_sidebar
+        csb = ConfigSidebar(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, csb)
+        return csb
+
+    def _init_playback_bar(self):
+        class PlaybackWidget(QWidget):
+            """Mock PlaybackWidget for placeholder purposes."""
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                layout = QVBoxLayout(self)
+                label = QLabel("Playback Controls Placeholder")
+                layout.addWidget(label)
+                self.setLayout(layout)
+        playback_widget = PlaybackWidget() # Placeholder for actual playback controls
+        playback_dock_widget = QDockWidget("Playback Controls", self)
+        playback_dock_widget.setWidget(playback_widget)
+        playback_dock_widget.setAllowedAreas(Qt.BottomDockWidgetArea)
+        playback_dock_widget.setVisible(False) # Start hidden
+        self.addDockWidget(Qt.BottomDockWidgetArea, playback_dock_widget)
+        return playback_dock_widget
 
     def _init_top_toolbar(self, config_sidebar, records_sidebar):
-        top_tool_bar = TopToolBar(parent=self.centralWidget())
-        self.addToolBar(Qt.TopToolBarArea, top_tool_bar)
-        top_tool_bar.config_panel_toggled.connect(lambda: toggle_widget(config_sidebar))
-        top_tool_bar.records_panel_toggled.connect(lambda: toggle_widget(records_sidebar))
-        return top_tool_bar
+        ttb = TopToolBar(parent=self.centralWidget())
+        self.addToolBar(Qt.TopToolBarArea, ttb)
+        ttb.config_panel_toggled.connect(lambda: toggle_widget(config_sidebar))
+        ttb.records_panel_toggled.connect(lambda: toggle_widget(records_sidebar))
+        return ttb
 
     def _init_tabs(self):
-        self.tabs = QTabWidget()
-        self.tabs.setTabsClosable(False)
-        self.tabs.setMovable(False)
-        self.tabs.setDocumentMode(True)
-        self.tabs.setTabPosition(QTabWidget.North)
+        tabs = QTabWidget()
+        tabs.setTabsClosable(False)
+        tabs.setMovable(False)
+        tabs.setDocumentMode(True)
+        tabs.setTabPosition(QTabWidget.North)
 
         tab_dashboard = self._init_tab_dashboard_layout()
-        tab_sensors = self._init_tab_sensors_layout()
-        # tab_system = self._init_tab_system_layout()
+        tabs.addTab(tab_dashboard, "Dashboard")
+        
+        # Lazy loading of the sensors tab
+        self.sensors_tab_placeholder = QWidget()
+        tabs.addTab(self.sensors_tab_placeholder, "Sensors")
+        
+        tabs.currentChanged.connect(self._handle_tab_changed)
+        
+        return tabs
 
-        self.tabs.addTab(tab_dashboard, "Dashboard")
-        self.tabs.addTab(tab_sensors, "Sensors")
-        # self.tabs.addTab(tab_system, "System")
-
-        self.tabs.currentChanged.connect(
-            lambda idx: self.tab_changed.emit(idx, self.tabs.tabText(idx))
-        )
-
-        self.tabs.setCurrentIndex(1)  # Set "Sensors" tab as default
-
-        self.setCentralWidget(self.tabs)
+    def _handle_tab_changed(self, index):
+        tab_text = self.tabs.tabText(index)
+        
+        # Sensors tab will be initiated on first use
+        if tab_text == "Sensors" and isinstance(self.tabs.widget(index), QWidget) and not hasattr(self, 'sensors_tab_initialized'):
+            self.sensors_tab_initialized = True
+            real_sensors_tab = self._init_tab_sensors_layout()
+            self.tabs.blockSignals(True)
+            self.tabs.removeTab(index)
+            self.tabs.insertTab(index, real_sensors_tab, "Sensors")
+            self.tabs.setCurrentIndex(index)
+            self.tabs.blockSignals(False)
+        
+        self.tab_changed.emit(index, tab_text)
 
     def _init_tab_dashboard_layout(self):
         self.rgb_graphics_view = FitGraphicsView(self)
         self.depth_graphics_view = FitGraphicsView(self)
-        self.long_control_widget = LongitudinalControlWidget()
-        self.lat_control_widget = LateralControlWidget()
-        self.map_plot = MapPlotWidget()
-        self.map3d_plot = Map3D()
+        # self.long_control_widget = LongitudinalControlWidget()
+        # self.lat_control_widget = LateralControlWidget()
+        # self.map3d_plot = Map3D()
 
         # Vision & Position
         navigation_group = QGroupBox("Navigation")
         navigation_layout = QVBoxLayout(navigation_group)
-        navigation_layout.addWidget(self.map3d_plot, stretch=2)
+        # navigation_layout.addWidget(self.map3d_plot, stretch=2)
 
         vision_layout = QHBoxLayout()
         vision_layout.addWidget(self.rgb_graphics_view)
@@ -178,22 +169,22 @@ class RendererMainWindow(QMainWindow):
         navigation_layout.addLayout(vision_layout, stretch=1)
 
         # Longitudinal Control
-        long_control_group = QGroupBox("Longitudinal Control")
-        long_control_layout = QVBoxLayout(long_control_group)
-        long_control_layout.addWidget(self.long_control_widget)
+        # long_control_group = QGroupBox("Longitudinal Control")
+        # long_control_layout = QVBoxLayout(long_control_group)
+        # long_control_layout.addWidget(self.long_control_widget)
 
         # Lateral Control
-        lat_control_group = QGroupBox(title="Lateral Control")
-        lat_control_layout = QVBoxLayout(lat_control_group)
-        lat_control_layout.addWidget(self.lat_control_widget)
+        # lat_control_group = QGroupBox(title="Lateral Control")
+        # lat_control_layout = QVBoxLayout(lat_control_group)
+        # lat_control_layout.addWidget(self.lat_control_widget)
 
-        lat_long_layout = QVBoxLayout()
-        lat_long_layout.addWidget(long_control_group)
-        lat_long_layout.addWidget(lat_control_group)
+        # lat_long_layout = QVBoxLayout()
+        # lat_long_layout.addWidget(long_control_group)
+        # lat_long_layout.addWidget(lat_control_group)
 
         main_layout = QHBoxLayout()
         main_layout.addWidget(navigation_group, stretch=1)
-        main_layout.addLayout(lat_long_layout, stretch=1)
+        # main_layout.addLayout(lat_long_layout, stretch=1)
 
         tab1 = QWidget()
         tab1.setLayout(main_layout)
@@ -269,19 +260,11 @@ class RendererMainWindow(QMainWindow):
 
     def _init_status_bar(self):
         status_bar = self.statusBar()
-        status_bar.setStyleSheet(
-            f"""
-            QStatusBar {{
-                background-color: {UIColors.ACCENT};
-                color: {UIColors.ON_ACCENT};
-            }}
-        """
-        )
         status_bar.setSizeGripEnabled(False)
 
         # Latency labels
-        latency_label = QLabel("<span style='font-weight: bold'>Latency</span> [ms] (FPS)")
-        latency_label.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
+        latency_header = QLabel("<span style='font-weight: bold'>Latency</span> [ms] (FPS)")
+        latency_header.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
 
         self.data_latency_label = EMALatencyLabel(name="Data")
         self.gui_latency_label = EMALatencyLabel(name="GUI")
@@ -289,7 +272,7 @@ class RendererMainWindow(QMainWindow):
         latency_labels_widget = QWidget()
         latency_labels_layout = QHBoxLayout(latency_labels_widget)
         latency_labels_layout.setContentsMargins(0, 3, 10, 5)
-        latency_labels_layout.addWidget(latency_label)
+        latency_labels_layout.addWidget(latency_header)
         latency_labels_layout.addWidget(self.data_latency_label)
         latency_labels_layout.addWidget(self.gui_latency_label)
 
@@ -357,87 +340,86 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
+    def __init__(self, profiler):
+        self.profiler = profiler
+
     def run(self):
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.app.setStyleSheet(APP_STYLE)
         self.app.setFont(Fonts.GUIMonospace)
+        self.app.aboutToQuit.connect(self._stop_threads)
 
         self.window = RendererMainWindow()
-        self.window.tab_changed.connect(self.on_tab_changed)
-
-        t_recorder = RecorderThread(data_queue=messaging.q_processing)
-        self.window.init_complete.connect(t_recorder.start)
-
-        t_playback = PlaybackThread(data_queue=messaging)
-        self.window.init_complete.connect(t_playback.start)
-
-        t_sim_data = SimDataThread()
-        t_sim_data.data_ready.connect(self.window.update_simulation_data)
-        # window.init_complete.connect(t_sim_data.start)
-
-        self.t_vehicle_data = RealDataThread()
-        self.window.init_complete.connect(self.t_vehicle_data.start)
-
-        threads = [t_sim_data, self.t_vehicle_data, t_recorder, t_playback]
         self.window.init()
 
-        self.t_vehicle_data.long_control_plot_data_ready.connect(self.window.long_control_widget.update)
-        self.t_vehicle_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
-        self.t_vehicle_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
-        self.t_vehicle_data.camera_rgb_updated_pixmap_ready.connect(
-            self.window.depth_graphics_view.update
-        )
-        self.t_vehicle_data.lr_encoder_plot_data_ready.connect(self.window.left_encoder_plot.update)
-        self.t_vehicle_data.rr_encoder_plot_data_ready.connect(self.window.right_encoder_plot.update)
-        self.t_vehicle_data.data_ready.connect(self.window.update_real_data)
+        self.t_recorder = RecorderThread(data_queue=messaging.q_processing)
+        self.t_playback = PlaybackThread()
+        self.t_real_data = RealDataThread()
+        self.threads = [self.t_real_data, self.t_recorder, self.t_playback]
 
-        self.window.top_tool_bar.record_toggled.connect(t_recorder.toggle)
-        self.window.top_tool_bar.playback_toggled.connect(t_playback.toggle)
-        self.window.records_sidebar.record_selected.connect(t_playback.set_current_record)
-        self.window.records_sidebar.record_selected.connect(
-            self.window.top_tool_bar.handle_record_selected
-        )
-        self.window.records_sidebar.record_selected.emit("1745511004652250500")
-        self.window.top_tool_bar.playback_toggled.emit(True)
+        for t in self.threads:
+            t.start()
 
-        self.app.aboutToQuit.connect(lambda: stop_threads(threads))
+        self.window.tab_changed.connect(self.on_tab_changed)
 
+        # self.t_real_data.long_control_plot_data_ready.connect(
+        #     self.window.long_control_widget.update
+        # )
+        # self.t_real_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
+        self.t_real_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
+        # self.t_real_data.camera_rgb_updated_pixmap_ready.connect(
+        #     self.window.depth_graphics_view.update
+        # )
+        # self.t_real_data.data_ready.connect(self.window.update_real_data)
+
+        self.window.top_tool_bar.record_toggled.connect(self.t_recorder.toggle)
+        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.toggle)
+        self.window.records_sidebar.record_selected.connect(self.t_playback.set_current_record)
+
+        # self._autoplay_record()
+        
+        self.profiler.stop()
+        print(self.profiler.output_text(unicode=True, color=True))
+        
         return self.app.exec()
 
     @Slot(int, str)
     def on_tab_changed(self, idx, name):
-        if name == "Sensors":
-            self.t_vehicle_data.imu_accel_plot_data_ready.connect(self.window.imu_accel_plot.update)
-            self.t_vehicle_data.imu_gyro_plot_data_ready.connect(self.window.imu_gyro_plot.update)
-            self.t_vehicle_data.imu_mag_plot_data_ready.connect(self.window.imu_mag_plot.update)
-            self.t_vehicle_data.imu_rotation_plot_data_ready.connect(self.window.imu_rotation_plot.update)
-        else:
-            self.t_vehicle_data.imu_accel_plot_data_ready.disconnect(self.window.imu_accel_plot.update)
-            self.t_vehicle_data.imu_gyro_plot_data_ready.disconnect(self.window.imu_gyro_plot.update)
-            self.t_vehicle_data.imu_mag_plot_data_ready.disconnect(self.window.imu_mag_plot.update)
-            self.t_vehicle_data.imu_rotation_plot_data_ready.disconnect(self.window.imu_rotation_plot.update)
+        imu_signals_slots = [
+            (self.t_real_data.imu_accel_plot_data_ready, self.window.imu_accel_plot.update),
+            (self.t_real_data.imu_gyro_plot_data_ready, self.window.imu_gyro_plot.update),
+            (self.t_real_data.imu_mag_plot_data_ready, self.window.imu_mag_plot.update),
+            (
+                self.t_real_data.imu_rotation_plot_data_ready,
+                self.window.imu_rotation_plot.update,
+            ),
+            (self.t_real_data.lr_encoder_plot_data_ready, self.window.left_encoder_plot.update),
+            (self.t_real_data.rr_encoder_plot_data_ready, self.window.right_encoder_plot.update),
+        ]
 
+        for signal, slot in imu_signals_slots:
+            signal.connect(slot) if name == "Sensors" else signal.disconnect(slot)
 
-def stop_threads(threads):
-    print("Shutting down threads gracefully...")
+    def _stop_threads(self):
+        pdebug("Shutting down threads gracefully...")
 
-    for t in threads:
-        if hasattr(t, "requestInterruption"):
+        for t in self.threads:
             t.requestInterruption()
 
-    # Give threads time to process the interruption request
-    QApplication.processEvents()
+        QApplication.processEvents()
 
-    for t in threads:
-        if hasattr(t, "stop"):
+        for t in self.threads:
             try:
                 t.stop()
             except Exception as e:
                 print(f"Error stopping thread {t}: {e}")
 
-    # Wait with timeout
-    for t in threads:
-        if not t.wait(1000):  # 1 second timeout
-            print(f"Thread {t} did not quit in time, forcing termination")
-            t.terminate()
-            t.wait()
+        for t in self.threads:
+            if not t.wait(1000):
+                print(f"Thread {t} did not quit in time - terminating..")
+                t.terminate()
+                t.wait()
+
+    def _autoplay_record(self, record: str = "1745511004652250500"):
+        self.window.records_sidebar.record_selected.emit(record)
+        self.window.top_tool_bar.playback_toggled.emit(True)

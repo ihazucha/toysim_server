@@ -1,5 +1,4 @@
 import numpy as np
-from typing import Iterable
 
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtCore import Qt
@@ -8,13 +7,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from pyqtgraph import PlotWidget, ScatterPlotItem, PlotCurveItem, TextItem, mkPen, mkBrush
 
 from modules.ui.data import EncoderPlotData
-from modules.ui.presets import UIColors, TooltipLabel, FrameCounter
+from modules.ui.presets import UIColors, TooltipLabel
 from modules.ui.plots import (
-    DATA_QUEUE_SIZE,
-    PLOT_TIME_STEPS,
     STEP_TICKS,
     PlotStatsWidget,
-    ENCODER_RAW2DEG,
 )
 
 

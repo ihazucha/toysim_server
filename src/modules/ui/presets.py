@@ -3,8 +3,9 @@ from typing import Iterable
 from time import perf_counter
 
 from PySide6.QtGui import QFont, QColor
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QWidget,
     QSizePolicy,
     QGraphicsView,
     QGraphicsScene,
@@ -13,6 +14,12 @@ from PySide6.QtWidgets import (
 )
 
 from pyqtgraph import PlotWidget, mkPen, InfiniteLine
+
+
+
+# Theme
+# -------------------------------------------------------------------------------------------------
+
 
 class Fonts:
     OpenGLMonospace = QFont("Monospace", 8)
@@ -51,6 +58,14 @@ class UIColors:
     ORANGE = "#FFCC99"
     PASTEL_BLUE = "#98f9f9"
 
+# Styles
+# -------------------------------------------------------------------------------------------------
+
+MAIN_WINDOW_STYLE = f"""
+    QMainWindow {{
+        background-color: {UIColors.PRIMARY};
+    }}
+"""
 
 TOOLTIP_STYLE = f"""
     QToolTip {{
@@ -82,12 +97,34 @@ GROUPBOX_STYLE = f"""
     }}
 """
 
+STATUSBAR_STYLE = f"""
+    QStatusBar {{
+        background-color: {UIColors.ACCENT};
+        color: {UIColors.ON_ACCENT};
+    }}
+"""
+
 APP_STYLE_LIST = [
+    MAIN_WINDOW_STYLE,
     TOOLTIP_STYLE,
     GROUPBOX_STYLE,
+    STATUSBAR_STYLE,
 ]
 
 APP_STYLE = "\n".join(APP_STYLE_LIST)
+
+
+# Helpers
+# -------------------------------------------------------------------------------------------------
+
+
+def toggle_widget(w: QWidget):
+    w.close() if w.isVisible() else w.show()
+
+
+# Widgets
+# -------------------------------------------------------------------------------------------------
+
 
 class TooltipLabel(QLabel):
     def __init__(self, text: str, tooltip: str | None = None, *args, **kwargs):
@@ -152,26 +189,30 @@ class PlotWidgetHorizontalCursor:
             self.vLine.setVisible(False)
             self.update_values_at_index_callback(-1)
 
-class FrameCounter(QObject):
-    sigFpsUpdate = Signal(object)
 
-    def __init__(self, interval=1000):
-        super().__init__()
-        self.count = 0
-        self.last_update = 0
-        self.interval = interval
+class EMALatencyLabel(QLabel):
+    """Exponential Moving Average latency measurement"""
+
+    def __init__(self, name: str, label_update_freq=120):
+        self._name = name
+        self._label_update_freq = label_update_freq
+
+        super().__init__(f"{self._name} FPS: --")
+        self.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
+
+        self._last_time = perf_counter()
+        self._avg_dt = self._last_time
+        self._counter = 0
+        self.alpha = 0.2
 
     def update(self):
-        self.count += 1
-
-        if self.last_update == 0:
-            self.last_update = perf_counter()
-            self.startTimer(self.interval)
-
-    def timerEvent(self, evt):
-        now = perf_counter()
-        elapsed = now - self.last_update
-        fps = self.count / elapsed
-        self.last_update = now
-        self.count = 0
-        self.sigFpsUpdate.emit(fps)
+        t = perf_counter()
+        dt = t - self._last_time
+        self._avg_dt = (1 - self.alpha) * self._avg_dt + self.alpha * dt
+        if self._counter == 0:
+            self.setText(
+                f"{self._name}: <span style='font-weight: bold'>{self._avg_dt:.3f}</span> "
+                f"(<span style='font-weight: bold'>{int(1/self._avg_dt)}</span>)"
+            )
+        self._last_time = t
+        self._counter = (self._counter + 1) % self._label_update_freq
