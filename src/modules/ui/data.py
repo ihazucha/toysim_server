@@ -13,6 +13,31 @@ from cv2 import imdecode, IMREAD_COLOR
 
 from modules.ui.plots import DATA_QUEUE_SIZE, ENCODER_RAW2DEG
 
+# Helpers
+# -------------------------------------------------------------------------------------------------
+
+def jpg2qimg(jpg: bytes):
+    bgr = imdecode(np.frombuffer(jpg, np.uint8), IMREAD_COLOR)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return rgb2qimg(rgb)
+
+def rgb2qimg(rgb: np.ndarray[Any, np.dtype[np.uint8]]):
+    h, w, channels = rgb.shape
+    return QImage(rgb.data, w, h, channels * w, QImage.Format_RGB888)
+
+def depth2qimg(depth: np.ndarray) -> QImage:
+    depth_colormap = depth2colormap(depth)
+    w, h, _ = depth_colormap.shape
+    return QImage(depth_colormap.data, h, w, QImage.Format_BGR888)
+
+def depth2colormap(depth: np.ndarray):
+    normalized_inverted = 255 - (depth / 5000 * 255).astype(np.uint8)
+    colormap = cv2.applyColorMap(normalized_inverted, cv2.COLORMAP_INFERNO)
+    return colormap
+
+
+# Data
+# -------------------------------------------------------------------------------------------------
 
 
 class LongControlPlotData:
@@ -92,6 +117,7 @@ class EncoderPlotData:
             sum(magnitude_changes) / len(magnitude_changes) if len(readings) else 0
         )
 
+
 class IMURawPlotData:
     def __init__(self):
         self.data = np.zeros((3, DATA_QUEUE_SIZE))
@@ -99,6 +125,7 @@ class IMURawPlotData:
     def update(self, xyz: Tuple[float, float, float]):
         self.data[:, :-1] = self.data[:, 1:]
         self.data[:, -1] = xyz
+
 
 class IMUPlotData:
     def __init__(self):
@@ -118,13 +145,13 @@ class IMUPlotData:
     def update(self, readings: Iterable[IMU2Data]):
         if not len(readings):
             return
-        
+
         self.accel_linear_avg = np.average([r.accel_linear for r in readings], axis=0)
         self.gyro_avg = np.average([r.gyro for r in readings], axis=0)
         self.mag_avg = np.average([r.mag for r in readings], axis=0)
-        
-        self.rotation_quaternion=QQuaternion(*readings[-1].rotation_quaternion)
-        self.rotation_euler_deg=readings[-1].rotation_euler_deg
+
+        self.rotation_quaternion = QQuaternion(*readings[-1].rotation_quaternion)
+        self.rotation_euler_deg = readings[-1].rotation_euler_deg
         self.rotation_euler = np.deg2rad(self.rotation_euler_deg)
 
         self.accel_linear_avg_history.update(self.accel_linear_avg)
@@ -132,6 +159,7 @@ class IMUPlotData:
         self.mag_avg_history.update(self.mag_avg)
         self.rotation_euler_history.update(self.rotation_euler)
         self.rotation_euler_deg_history.update(self.rotation_euler_deg)
+
 
 class QSimData:
     def __init__(self, raw: ProcessedSimData):
@@ -160,21 +188,8 @@ class QRealData:
         self.imu_plot: IMUPlotData
 
 
-def np2q_img(npimage: np.ndarray[Any, np.dtype[np.uint8]]):
-    h, w, channels = npimage.shape
-    return QImage(npimage.data, w, h, channels * w, QImage.Format_RGB888)
-
-
-def depth2qimage(depth: np.ndarray) -> QImage:
-    depth_colormap = depth_to_colormap(depth)
-    w, h, _ = depth_colormap.shape
-    return QImage(depth_colormap.data, h, w, QImage.Format_BGR888)
-
-
-def depth_to_colormap(depth_data: np.ndarray):
-    normalized_inverted = 255 - (depth_data / 5000 * 255).astype(np.uint8)
-    colormap = cv2.applyColorMap(normalized_inverted, cv2.COLORMAP_INFERNO)
-    return colormap
+# Processors
+# -------------------------------------------------------------------------------------------------
 
 
 class SimDataThread(QThread):
@@ -193,8 +208,8 @@ class SimDataThread(QThread):
             if data is None:
                 continue
             qsim_data = QSimData(raw=data)
-            qsim_data.rgb_qimage = np2q_img(data.debug_image)
-            qsim_data.depth_qimage = depth2qimage(data.depth)
+            qsim_data.rgb_qimage = rgb2qimg(data.debug_image)
+            qsim_data.depth_qimage = depth2qimg(data.depth)
             qsim_data.processor_period_ns = q_processing.last_put_timestamp - last_put_timestamp
             qsim_data.processor_dt_ns = q_processing.last_put_timestamp - data.begin_timestamp
             last_put_timestamp = q_processing.last_put_timestamp
@@ -209,16 +224,16 @@ class SimDataThread(QThread):
 class RealDataThread(QThread):
     data_ready = Signal(QRealData)
 
-    long_control_plot_data_ready=Signal(LongControlPlotData)
-    lat_control_plot_data_ready=Signal(LatControlPlotData)
-    camera_rgb_pixmap_ready=Signal(QPixmap)
-    camera_rgb_updated_pixmap_ready=Signal(QPixmap)
-    lr_encoder_plot_data_ready=Signal(EncoderPlotData)
-    rr_encoder_plot_data_ready=Signal(EncoderPlotData)
-    imu_accel_plot_data_ready=Signal(IMURawPlotData)
-    imu_gyro_plot_data_ready=Signal(IMURawPlotData)
-    imu_mag_plot_data_ready=Signal(IMURawPlotData)
-    imu_rotation_plot_data_ready=Signal(IMURawPlotData)
+    long_control_plot_data_ready = Signal(LongControlPlotData)
+    lat_control_plot_data_ready = Signal(LatControlPlotData)
+    camera_rgb_pixmap_ready = Signal(QPixmap)
+    camera_rgb_updated_pixmap_ready = Signal(QPixmap)
+    lr_encoder_plot_data_ready = Signal(EncoderPlotData)
+    rr_encoder_plot_data_ready = Signal(EncoderPlotData)
+    imu_accel_plot_data_ready = Signal(IMURawPlotData)
+    imu_gyro_plot_data_ready = Signal(IMURawPlotData)
+    imu_mag_plot_data_ready = Signal(IMURawPlotData)
+    imu_rotation_plot_data_ready = Signal(IMURawPlotData)
 
     def __init__(self):
         super().__init__()
@@ -239,7 +254,9 @@ class RealDataThread(QThread):
             pr_data: ProcessedRealData = q.get(100)
             if pr_data is None:
                 continue
-            
+
+            print(pr_data)
+
             jpg_image_data: JPGImageData = pr_data.original.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
             image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
@@ -269,22 +286,23 @@ class RealDataThread(QThread):
             self.imu_accel_plot_data_ready.emit(self.imu_plot_data.accel_linear_avg_history.data)
             self.imu_gyro_plot_data_ready.emit(self.imu_plot_data.gyro_avg_history.data)
             self.imu_mag_plot_data_ready.emit(self.imu_plot_data.mag_avg_history.data)
-            self.imu_rotation_plot_data_ready.emit(self.imu_plot_data.rotation_euler_deg_history.data)
+            self.imu_rotation_plot_data_ready.emit(
+                self.imu_plot_data.rotation_euler_deg_history.data
+            )
 
-            camera_rgb_pixmap = QPixmap.fromImage(np2q_img(image_array))
+            camera_rgb_pixmap = QPixmap.fromImage(rgb2qimg(image_array))
             self.camera_rgb_pixmap_ready.emit(camera_rgb_pixmap)
-            camera_debug_rgb_pixmap = QPixmap.fromImage(np2q_img(pr_data.debug_image))
-            self.camera_rgb_updated_pixmap_ready.emit(camera_debug_rgb_pixmap) 
-            
+            camera_debug_rgb_pixmap = QPixmap.fromImage(rgb2qimg(pr_data.debug_image))
+            self.camera_rgb_updated_pixmap_ready.emit(camera_debug_rgb_pixmap)
+
             qreal_data = QRealData(pr_data)
             # qreal_data.lat_control_plot = self.lat_control_plot_data
             # qreal_data.long_control_plot = self.long_control_plot_data
             # qreal_data.lr_encoder_plot = self.lr_encoder_plot_data
             # qreal_data.rr_encoder_plot = self.rr_encoder_plot_data
             qreal_data.imu_plot = self.imu_plot_data
-            self.data_ready.emit(qreal_data) 
+            self.data_ready.emit(qreal_data)
 
     def stop(self):
         self._is_running = False
         self.quit()
-

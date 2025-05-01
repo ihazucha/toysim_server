@@ -29,13 +29,13 @@ from modules.ui.widgets.imu import IMURawWidget
 from utils.paths import icon_path
 from utils.env import pdebug
 from modules.messaging import messaging
-from modules.ui.sidebar import RecordsSidebar
-from modules.ui.recorder import RecorderThread, PlaybackThread
-from modules.ui.toolbar import TopToolBar
-from modules.ui.config import ConfigSidebar
-from modules.ui.data import SimDataThread, RealDataThread, QSimData, QRealData
-from modules.ui.presets import Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
 from modules.ui.settings import WindowSettings
+from modules.ui.presets import Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
+from modules.ui.records_bar import RecordsSidebar
+from modules.ui.config_bar import ConfigSidebar
+from modules.ui.toolbar import TopToolBar
+from modules.ui.recorder import RecorderThread, PlaybackThread
+from modules.ui.data import RealDataThread, QSimData, QRealData
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QDockWidget
 
 
@@ -340,7 +340,7 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
-    def __init__(self, profiler):
+    def __init__(self, profiler = None):
         self.profiler = profiler
 
     def run(self):
@@ -378,8 +378,9 @@ class Renderer:
 
         # self._autoplay_record()
         
-        self.profiler.stop()
-        print(self.profiler.output_text(unicode=True, color=True))
+        if self.profiler is not None:
+            self.profiler.stop()
+            print(self.profiler.output_text(unicode=True, color=True))
         
         return self.app.exec()
 

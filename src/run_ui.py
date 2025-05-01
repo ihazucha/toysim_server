@@ -4,10 +4,10 @@
 # import signal
 # import os
 
-from pyinstrument import Profiler
+# from pyinstrument import Profiler
 
-profiler = Profiler()
-profiler.start()
+# profiler = Profiler()
+# profiler.start()
 
 # def main_loop():
 #     """
@@ -41,4 +41,5 @@ from modules.render import Renderer
 
 if __name__ == "__main__":
 #     main()
-    Renderer(profiler).run()
+    # Renderer(profiler).run()
+    Renderer().run()

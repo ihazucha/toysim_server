@@ -50,8 +50,10 @@ class RecordReader:
         frame_size_bytes = file_handle.read(RecordReader.Q_SIZE)
         if not frame_size_bytes:
             return None
+        
         frame_size = struct.unpack("=Q", frame_size_bytes)[0]
         data_bytes = file_handle.read(frame_size)
         if not data_bytes:
             return None
+        
         return data_cls.from_bytes(data_bytes)

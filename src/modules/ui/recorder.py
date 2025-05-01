@@ -49,7 +49,7 @@ class PlaybackThread(QThread):
                 if self._is_playing:
                     self._is_stopped = False
                     self._play_selected_record()
-                sleep(0.05)
+                sleep(0.025)
             except Exception as e:
                 print(e)
                 self._is_playing = False
@@ -62,11 +62,20 @@ class PlaybackThread(QThread):
 
     def set_current_record(self, record_name: str):
         self._selected_record = record_name
-        self._is_stopped = self._is_playing
-        self.toggle(False) 
+        self._is_stopped = True
+        print(f"Is stopped: {self._is_stopped}")
+        self.toggle(False)
+        self._play_one_frame()
 
     def toggle(self, is_playing: bool):
         self._is_playing = is_playing
+
+    def _play_one_frame(self):
+        path = record_path(self._selected_record)
+        data = RecordReader.read_one(path, ProcessedRealData)
+        q = messaging.q_real.get_producer()
+        sleep(0.05)
+        q.put(data.original.to_bytes())
 
     def _play_selected_record(self):   
         path = record_path(self._selected_record)
@@ -83,6 +92,7 @@ class PlaybackThread(QThread):
         frame_count = len(data)
         i = 0
         while i < frame_count:
+            print("haha")
             if self._is_stopped:
                 break
             if not self._is_playing:
