@@ -1,8 +1,10 @@
 import os
+import traceback
+import re
+
 from enum import IntEnum
 from datetime import datetime
 from pickle import UnpicklingError
-
 
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -18,67 +20,73 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPoint, QSize
 from PySide6.QtGui import QAction, QPixmap
 
-from utils.paths import PATH_RECORDS, record_path
 from modules.ui.presets import UIColors
 from modules.recorder import RecordReader
-from datalink.data import ProcessedRealData, ProcessedSimData
 from modules.ui.data import jpg2qimg, rgb2qimg
-import re
+from datalink.data import ProcessedRealData, ProcessedSimData
+from utils.paths import PATH_RECORDS, record_path
 from utils.env import DEBUG, pwarn, perror
-import traceback
+
 
 class CustomListItemRoles(IntEnum):
     ID = Qt.ItemDataRole.UserRole
 
+
 class RecordItemWidget(QWidget):
     """Custom widget for displaying record items with preview image and date."""
-    
+
     def __init__(self, date_str: str, time_str: str, thumbnail: QPixmap = None, parent=None):
         super().__init__(parent)
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
-        
+
         self.image_label = QLabel()
         self.image_label.setFixedSize(64, 64)
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet(f"""
+        self.image_label.setStyleSheet(
+            f"""
             background-color: {UIColors.FOREGROUND};
             border-radius: 5px;
             /* border: 1px solid {UIColors.ON_FOREGROUND_DIM}; */
             font-style: italic;
             color: {UIColors.ON_FOREGROUND}
-        """)
-        
+        """
+        )
+
         if thumbnail is not None:
             self.image_label.setPixmap(thumbnail)
         else:
             self.image_label.setText("No\nPreview")
             self.image_label.setAlignment(Qt.AlignCenter)
-            
+
         date_layout = QVBoxLayout()
         date_layout.setSpacing(2)
-        
+
         self.date_label = QLabel(date_str)
-        self.date_label.setStyleSheet(f"""
+        self.date_label.setStyleSheet(
+            f"""
             font-weight: bold;
             font-size: 12px;
-        """)
-        
+        """
+        )
+
         self.time_label = QLabel(time_str)
-        self.time_label.setStyleSheet("""
+        self.time_label.setStyleSheet(
+            """
             font-size: 10px;
-        """)
-        
+        """
+        )
+
         date_layout.addWidget(self.date_label)
         date_layout.addWidget(self.time_label)
         date_layout.addStretch()
-        
+
         layout.addWidget(self.image_label)
         layout.addLayout(date_layout, 1)
-        
+
         self.setLayout(layout)
-        
+
     def sizeHint(self):
         return QSize(160, 82)
 
@@ -141,7 +149,6 @@ class RecordsSidebar(QDockWidget):
         self.setWidget(widget)
         # self.close()
 
-
     def load_records(self):
         self.record_list.clear()
 
@@ -166,7 +173,9 @@ class RecordsSidebar(QDockWidget):
             try:
                 data = RecordReader.read_one(record_path(record_timestamp), ProcessedRealData)
             except UnpicklingError as e:
-                pwarn(f"[{self.__class__.__name__}] Unable to unpickle record: {record_timestamp} | Error: {e}")
+                pwarn(
+                    f"[{self.__class__.__name__}] Unable to unpickle record: {record_timestamp} | Error: {e}"
+                )
                 if DEBUG == 2:
                     traceback.print_exc()
             if data is not None:
@@ -187,14 +196,14 @@ class RecordsSidebar(QDockWidget):
 
         pixmap = QPixmap.fromImage(qimg)
         pixmap = pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        
+
         item_widget = RecordItemWidget(date_str=date_str, time_str=time_str, thumbnail=pixmap)
-        
+
         # Create list item and set size
         list_item = QListWidgetItem(self.record_list)
         list_item.setData(CustomListItemRoles.ID, record_timestamp)
         list_item.setSizeHint(item_widget.sizeHint())
-        
+
         # Add widget to list
         self.record_list.addItem(list_item)
         self.record_list.setItemWidget(list_item, item_widget)

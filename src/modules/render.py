@@ -1,10 +1,11 @@
 import sys
 
+from PySide6 import QtGui
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QPixmap, QIcon
-from PySide6 import QtGui
 from PySide6.QtWidgets import (
     QApplication,
+    QDockWidget,
     QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
@@ -13,30 +14,31 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QLabel,
     QGroupBox,
+    QSlider,
+    QPushButton
 )
 
-from modules.ui.plots import (
-    LatencyPlotWidget,
-)
-# from modules.ui.widgets.long_control import LongitudinalControlWidget
-# from modules.ui.widgets.lat_control import LateralControlWidget
-from modules.ui.widgets.encoder import EncoderWidget
-from modules.ui.presets import UIColors
-# from modules.ui.widgets.map3d import Map3D
-from modules.ui.widgets.imu3d import IMU3D
-from modules.ui.widgets.imu import IMURawWidget
 
 from utils.paths import icon_path
 from utils.env import pdebug
+
+from modules.ui.plots import LatencyPlotWidget
+# from modules.ui.widgets.long_control import LongitudinalControlWidget
+# from modules.ui.widgets.lat_control import LateralControlWidget
+from modules.ui.widgets.encoder import EncoderWidget
+from modules.ui.widgets.playback import PlaybackWidget
+# from modules.ui.widgets.map3d import Map3D
+from modules.ui.widgets.imu3d import IMU3D
+from modules.ui.widgets.imu import IMURawWidget
+from modules.ui.presets import UIColors
 from modules.messaging import messaging
 from modules.ui.settings import WindowSettings
 from modules.ui.presets import Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
-from modules.ui.records_bar import RecordsSidebar
+from modules.ui.records_bar import RecordsSidebar, RecordItemWidget
 from modules.ui.config_bar import ConfigSidebar
 from modules.ui.toolbar import TopToolBar
 from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.data import RealDataThread, QSimData, QRealData
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QDockWidget
 
 
 # Global config
@@ -70,7 +72,7 @@ class RendererMainWindow(QMainWindow):
         self.config_sidebar = self._init_config_sidebar()
         self.records_sidebar = self._init_records_sidebar()
         self.top_tool_bar = self._init_top_toolbar(self.config_sidebar, self.records_sidebar)
-        self.playback_bar = self._init_playback_bar()
+        self.playback_bar, self.playback_widget = self._init_playback_bar()
         self._init_status_bar()
 
         # Setup
@@ -81,7 +83,7 @@ class RendererMainWindow(QMainWindow):
 
         # Signals
         self.records_sidebar.record_selected.connect(self.top_tool_bar.on_record_selected)
-        self.records_sidebar.record_selected.connect(lambda: toggle_widget(self.playback_bar))
+        self.records_sidebar.record_selected.connect(lambda: self.playback_bar.show() if self.playback_bar.isHidden() else None)
 
     def _init_records_sidebar(self):
         rsb = RecordsSidebar(self)
@@ -94,21 +96,14 @@ class RendererMainWindow(QMainWindow):
         return csb
 
     def _init_playback_bar(self):
-        class PlaybackWidget(QWidget):
-            """Mock PlaybackWidget for placeholder purposes."""
-            def __init__(self, parent=None):
-                super().__init__(parent)
-                layout = QVBoxLayout(self)
-                label = QLabel("Playback Controls Placeholder")
-                layout.addWidget(label)
-                self.setLayout(layout)
-        playback_widget = PlaybackWidget() # Placeholder for actual playback controls
+
+        playback_widget = PlaybackWidget()
         playback_dock_widget = QDockWidget("Playback Controls", self)
         playback_dock_widget.setWidget(playback_widget)
         playback_dock_widget.setAllowedAreas(Qt.BottomDockWidgetArea)
-        playback_dock_widget.setVisible(False) # Start hidden
+        playback_dock_widget.setVisible(False)
         self.addDockWidget(Qt.BottomDockWidgetArea, playback_dock_widget)
-        return playback_dock_widget
+        return playback_dock_widget, playback_widget
 
     def _init_top_toolbar(self, config_sidebar, records_sidebar):
         ttb = TopToolBar(parent=self.centralWidget())
@@ -126,20 +121,24 @@ class RendererMainWindow(QMainWindow):
 
         tab_dashboard = self._init_tab_dashboard_layout()
         tabs.addTab(tab_dashboard, "Dashboard")
-        
+
         # Lazy loading of the sensors tab
         self.sensors_tab_placeholder = QWidget()
         tabs.addTab(self.sensors_tab_placeholder, "Sensors")
-        
+
         tabs.currentChanged.connect(self._handle_tab_changed)
-        
+
         return tabs
 
     def _handle_tab_changed(self, index):
         tab_text = self.tabs.tabText(index)
-        
+
         # Sensors tab will be initiated on first use
-        if tab_text == "Sensors" and isinstance(self.tabs.widget(index), QWidget) and not hasattr(self, 'sensors_tab_initialized'):
+        if (
+            tab_text == "Sensors"
+            and isinstance(self.tabs.widget(index), QWidget)
+            and not hasattr(self, "sensors_tab_initialized")
+        ):
             self.sensors_tab_initialized = True
             real_sensors_tab = self._init_tab_sensors_layout()
             self.tabs.blockSignals(True)
@@ -147,7 +146,7 @@ class RendererMainWindow(QMainWindow):
             self.tabs.insertTab(index, real_sensors_tab, "Sensors")
             self.tabs.setCurrentIndex(index)
             self.tabs.blockSignals(False)
-        
+
         self.tab_changed.emit(index, tab_text)
 
     def _init_tab_dashboard_layout(self):
@@ -278,9 +277,9 @@ class RendererMainWindow(QMainWindow):
 
         status_bar.addPermanentWidget(latency_labels_widget)
 
-    def paintEvent(self, event):
-        self.gui_latency_label.update()
-        super().paintEvent(event)
+    # def paintEvent(self, event):
+    # self.gui_latency_label.update()
+    # super().paintEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F11:
@@ -340,7 +339,7 @@ class RendererMainWindow(QMainWindow):
 
 
 class Renderer:
-    def __init__(self, profiler = None):
+    def __init__(self, profiler=None):
         self.profiler = profiler
 
     def run(self):
@@ -356,6 +355,11 @@ class Renderer:
         self.t_playback = PlaybackThread()
         self.t_real_data = RealDataThread()
         self.threads = [self.t_real_data, self.t_recorder, self.t_playback]
+
+        self.window.playback_widget.frame_changed.connect(self.t_playback.on_frame_index_set)
+        self.window.playback_widget.play_pause_toggled.connect(self.t_playback.on_play_pause_toggle)
+        self.t_playback.frame_ready.connect(self.window.playback_widget.on_next_frame)
+        self.t_playback.record_loaded.connect(self.window.playback_widget.on_record_loaded)
 
         for t in self.threads:
             t.start()
@@ -373,15 +377,15 @@ class Renderer:
         # self.t_real_data.data_ready.connect(self.window.update_real_data)
 
         self.window.top_tool_bar.record_toggled.connect(self.t_recorder.toggle)
-        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.toggle)
-        self.window.records_sidebar.record_selected.connect(self.t_playback.set_current_record)
+        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.on_play_pause_toggle)
+        self.window.records_sidebar.record_selected.connect(self.t_playback.on_record_set)
 
         # self._autoplay_record()
-        
+
         if self.profiler is not None:
             self.profiler.stop()
             print(self.profiler.output_text(unicode=True, color=True))
-        
+
         return self.app.exec()
 
     @Slot(int, str)

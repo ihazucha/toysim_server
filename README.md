@@ -61,5 +61,7 @@ computer vision, control theory, and others, combined in compact package for who
 Icons: - put on git/in the thesis
 Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>
 
-pyqtgraph has to be the latest install (from sou
-https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html
+- pyqtgraph has to be the latest install (from source)
+  - https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html
+- superqt
+  - https://pyapp-kit.github.io/superqt/

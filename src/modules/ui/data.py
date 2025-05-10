@@ -42,17 +42,18 @@ def depth2colormap(depth: np.ndarray):
 
 class LongControlPlotData:
     def __init__(self):
-        # Long plot data
         self.measured_speed = np.zeros(DATA_QUEUE_SIZE)
         self.target_speed = np.zeros(DATA_QUEUE_SIZE)
         self.engine_power_percent = np.zeros(DATA_QUEUE_SIZE)
 
     def update(self, avg_speed, target_speed, engine_power_percent):
         self.measured_speed[:-1] = self.measured_speed[1:]
-        self.target_speed[:-1] = self.target_speed[1:]
-        self.engine_power_percent[:-1] = self.engine_power_percent[1:]
         self.measured_speed[-1] = avg_speed
+
+        self.target_speed[:-1] = self.target_speed[1:]
         self.target_speed[-1] = target_speed
+
+        self.engine_power_percent[:-1] = self.engine_power_percent[1:]
         self.engine_power_percent[-1] = engine_power_percent
 
 
@@ -64,10 +65,12 @@ class LatControlPlotData:
 
     def update(self, estimated_sa, target_sa, input_sa):
         self.estimated_sa[:-1] = self.estimated_sa[1:]
-        self.target_sa[:-1] = self.target_sa[1:]
-        self.input_sa[:-1] = self.input_sa[1:]
         self.estimated_sa[-1] = estimated_sa
+
+        self.target_sa[:-1] = self.target_sa[1:]
         self.target_sa[-1] = target_sa
+
+        self.input_sa[:-1] = self.input_sa[1:]
         self.input_sa[-1] = input_sa
 
 
@@ -254,8 +257,6 @@ class RealDataThread(QThread):
             pr_data: ProcessedRealData = q.get(100)
             if pr_data is None:
                 continue
-
-            print(pr_data)
 
             jpg_image_data: JPGImageData = pr_data.original.sensor_fusion.camera
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
