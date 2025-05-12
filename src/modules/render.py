@@ -77,18 +77,27 @@ class RendererMainWindow(QMainWindow):
         self.config_sidebar = self._init_config_sidebar()
         self.records_sidebar = self._init_records_sidebar()
         self.top_tool_bar = self._init_top_toolbar(self.config_sidebar, self.records_sidebar)
-        self.playback_bar, self.playback_widget = self._init_playback_bar()
+        self.playback_widget = self._init_playback_bar()
         self._init_status_bar()
+
+        w = QWidget()
+        # w.setStyleSheet("* {background-color: rgba(0, 10, 0, 40); border: 1px solid; border-color: rgba(0, 255, 0, 40)}")
+        w.setContentsMargins(0, 0, 0, 0)
+        central_layout = QVBoxLayout(w)
+        central_layout.setContentsMargins(0, -5, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.tabs)
+        central_layout.addWidget(self.playback_widget)
 
         # Setup
         self.setWindowTitle("ToySim UI")
         self.setWindowIcon(QIcon(icon_path("toysim_icon")))
-        self.setCentralWidget(self.tabs)
+        self.setCentralWidget(w)
         self.showNormal()
 
         # Signals
         self.records_sidebar.record_selected.connect(self.top_tool_bar.on_record_selected)
-        self.records_sidebar.record_selected.connect(lambda: self.playback_bar.show() if self.playback_bar.isHidden() else None)
+        self.records_sidebar.record_selected.connect(lambda: self.playback_widget.show() if self.playback_widget.isHidden() else None)
 
     def _init_records_sidebar(self):
         rsb = RecordsSidebar(self)
@@ -101,14 +110,9 @@ class RendererMainWindow(QMainWindow):
         return csb
 
     def _init_playback_bar(self):
-
         playback_widget = PlaybackWidget()
-        playback_dock_widget = QDockWidget("Playback Controls", self)
-        playback_dock_widget.setWidget(playback_widget)
-        playback_dock_widget.setAllowedAreas(Qt.BottomDockWidgetArea)
-        playback_dock_widget.setVisible(False)
-        self.addDockWidget(Qt.BottomDockWidgetArea, playback_dock_widget)
-        return playback_dock_widget, playback_widget
+        playback_widget.hide()
+        return playback_widget
 
     def _init_top_toolbar(self, config_sidebar, records_sidebar):
         ttb = TopToolBar(parent=self.centralWidget())
@@ -267,7 +271,7 @@ class RendererMainWindow(QMainWindow):
         status_bar.setSizeGripEnabled(False)
 
         # Latency labels
-        latency_header = QLabel("<span style='font-weight: bold'>Latency</span> [ms] (FPS)")
+        latency_header = QLabel("Latency [s] (fps)")
         latency_header.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
 
         self.data_latency_label = EMALatencyLabel(name="Data")
@@ -364,6 +368,7 @@ class Renderer:
 
         self.window.playback_widget.frame_changed.connect(self.t_playback.on_frame_index_set)
         self.window.playback_widget.play_pause_toggled.connect(self.t_playback.on_play_pause_toggled)
+        self.window.playback_widget.start_end_changed.connect(self.t_playback.on_start_end_index_change)
         self.t_playback.frame_ready.connect(self.window.playback_widget.on_next_frame)
         self.t_playback.record_loaded.connect(self.window.playback_widget.on_record_loaded)
 

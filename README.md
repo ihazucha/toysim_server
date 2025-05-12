@@ -65,3 +65,4 @@ Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>
   - https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html
 - superqt
   - https://pyapp-kit.github.io/superqt/
+- pip install fonticon-materialdesignicons7

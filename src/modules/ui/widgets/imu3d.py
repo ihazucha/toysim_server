@@ -176,7 +176,7 @@ class IMU3D(GLViewWidget):
 
     def __init__(self):
         super().__init__()
-        self.setBackgroundColor((10, 10, 10, 255))
+        self.setBackgroundColor(UIColors.FOREGROUND)
         self.setCameraPosition(
             pos=self.INIT_OPTS["center"],
             distance=self.INIT_OPTS["distance"],

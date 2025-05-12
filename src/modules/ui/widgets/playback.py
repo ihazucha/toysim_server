@@ -6,7 +6,7 @@ from time import sleep, time_ns
 from typing import Iterable
 from enum import IntEnum
 
-from modules.ui.presets import UIColors
+from modules.ui.presets import COMBOBOX_STYLE, UIColors
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QApplication,
-    QComboBox
+    QComboBox,
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QKeyCombination, QSize
 from datetime import datetime
@@ -29,6 +29,7 @@ from fonticon_mdi7 import MDI7
 
 from PySide6.QtCore import QDir
 from utils.paths import PATH_STATIC
+
 # Register the icon path with Qt's resource system
 # This allows using "icons:filename.png" in QML or stylesheets
 QDir.addSearchPath("icons", PATH_STATIC)
@@ -130,13 +131,9 @@ class RecordReader(QThread):
 # Playback
 # -----------------------------------------------------------------------------
 
-class FrameIndicatorTypes(IntEnum):
-    Frame = 1
-    Time = 2
-
-
 class PlaybackWidget(QWidget):
     frame_changed = Signal(int)
+    start_end_changed = Signal(int, int)
     play_pause_toggled = Signal(bool)
     repeat_toggled = Signal(bool)
 
@@ -150,169 +147,138 @@ class PlaybackWidget(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        self.time_label = QLabel("00:00.000")
-        self.end_time_label = QLabel("00:00.000")
-
-        self.frame_label = QLabel("000000000")
-        self.end_frame_label = QLabel("000000000")
-
         self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider.setContentsMargins(0, 0, 3, 0)
         self.timeline_slider.valueChanged.connect(self._on_slider_value_changed)
 
         self.timeline_start_end_slider = QLabeledRangeSlider(Qt.Orientation.Horizontal)
+        self.timeline_start_end_slider.setValue((0, 0))
+        self.timeline_start_end_slider.hide()
         self.timeline_start_end_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.timeline_start_end_slider.setBarMovesAllHandles(False)
         self.timeline_start_end_slider.setEdgeLabelMode(QLabeledRangeSlider.EdgeLabelMode.NoLabel)
+        # create bit of a margin for timeline_start_end_slider
+        self.timeline_start_end_slider.setContentsMargins(0, 0, 3, 0)
         self.timeline_start_end_slider.setHandleLabelPosition(
-            QLabeledRangeSlider.LabelPosition.LabelsBelow
+            QLabeledRangeSlider.LabelPosition.LabelsOnHandle
         )
-        self.timeline_slider.valueChanged.connect(self._on_start_end_value_changed)
+        self.timeline_start_end_slider.label_shift_y = 18
+        self.timeline_start_end_slider.label_shift_x = -1
+        self.timeline_start_end_slider.valueChanged.connect(self._on_start_end_values_changed)
 
         self.play_icon = icon(MDI7.play_outline, color=UIColors.ON_PRIMARY, scale_factor=1.05)
         self.pause_icon = icon(MDI7.pause, color=UIColors.ON_PRIMARY)
         self.repeat_on_icon = icon(MDI7.repeat, color=UIColors.ON_PRIMARY)
         self.repeat_off_icon = icon(MDI7.repeat_off, color=UIColors.ON_PRIMARY)
+        self.config_icon = icon(MDI7.tune, color=UIColors.ON_PRIMARY, scale_factor=0.85)
 
         self.play_pause_button = QPushButton()
         self.play_pause_button.setFlat(True)
-        self.play_pause_button.setIconSize(QSize(32, 32))
+        self.play_pause_button.setIconSize(QSize(36, 36))
         self.play_pause_button.setIcon(self.play_icon)
         self.play_pause_button.setCheckable(True)
         self.play_pause_button.toggled.connect(self._on_play_pause_toggled)
 
         self.repeat_button = QPushButton()
         self.repeat_button.setFlat(True)
-        self.repeat_button.setIconSize(QSize(32, 32))
+        self.repeat_button.setIconSize(QSize(36, 36))
         self.repeat_button.setIcon(self.repeat_off_icon)
         self.repeat_button.setCheckable(True)
         self.repeat_button.setChecked(True)
         self.repeat_button.toggled.connect(self._on_repeat_toggled)
 
+        self.config_button = QPushButton()
+        self.config_button.setFlat(True)
+        self.config_button.setIconSize(QSize(36, 36))
+        self.config_button.setIcon(self.config_icon)
+        self.config_button.setCheckable(True)
+        self.config_button.setChecked(False)
+        self.config_button.toggled.connect(self._on_config_toggled)
+
         self.frame_indicator_select = QComboBox()
-        self.frame_indicator_select.setStyleSheet(
-        f"""
-            QComboBox {{
-                border: none;
-                background-color: transparent;
-                padding: 1px 18px 1px 3px;
-                width: 48px;
-            }}
-            QComboBox:editable {{
-                background: white;
-            }}
-            QComboBox::drop-down:button {{
-                background-color: #272727;
-                width: 36px;
-                border:none;
-                border-radius:5px;
-            }}
-            QComboBox::down-arrow {{
-                image: url(icons:chevron-down.svg);
-            }}
-            QComboBox QAbstractItemView::item {{
-                background-color: {UIColors.PRIMARY};
-                min-height: 36px; /* Or match the QComboBox's height */
-            }}
-            QComboBox QAbstractItemView::item:hover {{
-                background-color: #272727;
-                border: none;
-            }}
-        """
-        )
-        self.frame_indicator_select.setIconSize(QSize(32, 32))
-        self.frame_indicator_select.addItem("--", userData=FrameIndicatorTypes.Frame)
-        self.frame_indicator_select.addItem("--", userData=FrameIndicatorTypes.Time)
-        self.frame_indicator_select.setMinimumHeight(40)
+        self.frame_indicator_select.setStyleSheet(COMBOBOX_STYLE)
+        self.frame_indicator_select.setMinimumWidth(155)
+        self.frame_indicator_select.setFixedHeight(42)
+        self.frame_indicator_select.addItem("00:00.000 / 00:00.000")
+        self.frame_indicator_select.addItem("0 / 0")
 
         layout = QGridLayout(self)
+        cm = layout.contentsMargins()
+        cm.setTop(2)
+        layout.setContentsMargins(cm)
+
         layout.addWidget(self.repeat_button, 0, 0)
         layout.addWidget(self.play_pause_button, 0, 1)
         layout.addWidget(self.timeline_slider, 0, 2)
-        layout.addWidget(self.time_label, 0, 3)
-        layout.addWidget(QLabel("/"), 0, 4)
-        layout.addWidget(self.end_time_label, 0, 5)
-        layout.addWidget(self.frame_indicator_select, 0, 6)
-
-
-        # layout.addWidget(self.end_time_label, 0, 2,)
-
-        # layout.addWidget(self.frame_label, 1, 0, alignment=Qt.AlignmentFlag.AlignRight)
-        # layout.addWidget(self.end_frame_label, 1, 2, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        # layout.addWidget(self.timeline_start_end_slider, 2, 1)
-
+        layout.addWidget(self.timeline_start_end_slider, 0, 2)
+        layout.addWidget(self.frame_indicator_select, 0, 3)
+        layout.addWidget(self.config_button, 0, 4)
 
         self.setLayout(layout)
 
     @Slot(UIFrame)
     def on_next_frame(self, frame: UIFrame):
-        print(f"[PB Wid] on_next_frame {frame}")
         self._current_frame = frame
         self._update_ui_elements()
 
     @Slot(UIRecord)
     def on_record_loaded(self, record: UIRecord):
-        print(f"[PB Wid] on_record_loaded {record}")
         self._record = record
         self.play_pause_button.setChecked(False)
         self._reset_ui_elements()
 
     @Slot(bool)
     def _on_play_pause_toggled(self, play):
-        print(f"[PB Wid] on_play_pause_toggled {play}")
         self.play_pause_toggled.emit(play)
         self.play_pause_button.setIcon(self.pause_icon if play else self.play_icon)
 
     @Slot(bool)
     def _on_repeat_toggled(self, repeat):
-        print(f"[PB Wid] _on_repeat_toggled {repeat}")
         self.repeat_toggled.emit(repeat)
         self.repeat_button.setIcon(self.repeat_off_icon if repeat else self.repeat_on_icon)
 
+    @Slot(bool)
+    def _on_config_toggled(self, checked):
+        self.timeline_start_end_slider.show() if checked else self.timeline_start_end_slider.hide()
+
     @Slot(int)
     def _on_slider_value_changed(self, position):
-        print(f"[PB Wid] on_slider_value_changed {position}")
         self.play_pause_button.setChecked(False)
         self.play_pause_toggled.emit(False)
         self.frame_changed.emit(position)
 
     @Slot(tuple)
-    def _on_start_end_value_changed(self, start_end: tuple):
-        print(f"[PB Wid] _on_start_end_value_changed {start_end}")
+    def _on_start_end_values_changed(self, start_end: tuple):
+        # Skip default value change
+        if self._current_frame is None:
+            return
+        start, end = start_end
+        if self._current_frame.index < start:
+            self.timeline_slider.setValue(start)
+        elif self._current_frame.index > end:
+            self.timeline_slider.setValue(end)
+        self.start_end_changed.emit(start, end)
 
     def _reset_ui_elements(self):
-        print(f"[PD Wid] _reset_ui_elements r: {self._record} f: {self._current_frame}")
-
         slider_max = self._record.frames_count - 1
-
-        self.time_label.setText(self._timestamp_to_relative_time(self._record.first_timestamp))
-        self.end_time_label.setText(self._timestamp_to_relative_time(self._record.last_timestamp))
-        self.frame_label.setText(f"0")
-        self.end_frame_label.setText(f"{slider_max}")
-
         self.timeline_slider.setValue(0)
         self.timeline_slider.setMaximum(slider_max)
         self.timeline_start_end_slider.setMaximum(slider_max)
         self.timeline_start_end_slider.setValue((0, slider_max))
-
         self.play_pause_button.setEnabled(True)
 
-    def _update_ui_elements(self):
-        print(f"[PD Wid] _update_ui_elements r:{self._record} f: {self._current_frame}")
 
+    def _update_ui_elements(self):
         assert self._record is not None, "Record should be set here"
         assert self._current_frame is not None, "Current frame should be set here"
 
+        t = self._timestamp_to_relative_time(self._current_frame.timestamp)
+        end_t = self._timestamp_to_relative_time(self._record.last_timestamp)
+        self.frame_indicator_select.setItemText(0, f"{t} / {end_t}")
+
         i = self._current_frame.index
-
-        self.frame_indicator_select.setItemText(0, f"{i}")
-        self.frame_indicator_select.setItemText(1, f"{self._timestamp_to_relative_time(self._current_frame.timestamp)}")
-
-        self.frame_label.setText(f"{i}")
-        # self.timestamp_label.setText(f"Timestamp: {self._current_frame.timestamp / 1e9:.3f}")
-        self.time_label.setText(
-            f"{self._timestamp_to_relative_time(self._current_frame.timestamp)}"
-        )
+        last_i = self._record.frames_count - 1
+        self.frame_indicator_select.setItemText(1, f"{i} / {last_i}")
 
         self.timeline_slider.blockSignals(True)
         self.timeline_slider.setValue(i)

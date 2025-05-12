@@ -88,12 +88,13 @@ class ReferenceFrameLabel(QLabel):
             f"""
             background-color: rgba{QColor(UIColors.FOREGROUND).getRgb()}; 
             color: rgba{GLColors.ORANGE.getRgb()}; 
-            padding: 5px;
+            padding: 3px 5px 5px 3px;
             border-radius: 5px;
             border: 1px solid rgba{QColor(UIColors.ON_FOREGROUND_DIM).getRgb()};
             font-weight: bold;
         """
         )
+        self.setMinimumWidth(80)
         self.setFont(Fonts.OpenGLMonospace)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self.show()

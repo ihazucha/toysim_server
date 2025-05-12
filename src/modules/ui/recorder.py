@@ -60,6 +60,8 @@ class PlaybackThread(QThread):
         self._record = None
         self._record_frames = None
         self._i = 0
+        self._start_i = 0
+        self._end_i = 0
 
     def run(self):
         self._is_running = True
@@ -103,6 +105,11 @@ class PlaybackThread(QThread):
         print(f"[PB Data] on_play_pause_toggle {play}")
         self._is_playing = play
 
+    @Slot(int, int)
+    def on_start_end_index_change(self, start, end):
+        self._start_i = start
+        self._end_i = end
+
     def _load_record(self, record_name: str):
         try:
             path = record_path(record_name)
@@ -114,6 +121,7 @@ class PlaybackThread(QThread):
                 last_timestamp=self._record_frames[-1].original.timestamp
             )
             self.record_loaded.emit(self._record)
+            self._end_i = self._record.frames_count - 1
         except Exception as e:
             print(f"[E] [PlaybackThread] Error while loading record: {e}")
 
@@ -129,10 +137,9 @@ class PlaybackThread(QThread):
             return
         
         self._is_stopped = False
-        self._i = 0
-        end = self._record.frames_count - 1
+        self._i = self._start_i
 
-        while self._i < end:
+        while self._i < self._end_i:
             if self._is_stopped:
                 break
             while not self._is_playing:

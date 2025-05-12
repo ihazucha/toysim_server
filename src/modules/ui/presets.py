@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
 from pyqtgraph import PlotWidget, mkPen, InfiniteLine
 
 
-
 # Theme
 # -------------------------------------------------------------------------------------------------
 
@@ -25,38 +24,41 @@ class Fonts:
     OpenGLMonospace = QFont("Monospace", 8)
     GUIMonospace = QFont("Monospace", 10)
 
+
 class GLColors:
     WHITE = QColor(255, 255, 255, 255)
     BLACK = QColor(0, 0, 0, 255)
-    
+
     RED = QColor(255, 40, 40, 255)
     GREEN = QColor(40, 255, 40, 255)
     BLUE = QColor(40, 40, 255, 255)
-    
+
     PURPLE = QColor(136, 97, 170, 255)
     TURQUOIS = QColor(23, 155, 93, 255)
     ORANGE = QColor(255, 165, 0, 255)
 
+
 class UIColors:
     PRIMARY = "#202020"
     ON_PRIMARY = "#919090"
-    
+
     SECONDARY = "#1E1E1E"
     ON_SECONDARY = "#878786"
-    
+
     FOREGROUND = "#131313"
     ON_FOREGROUND = "#565757"
     ON_FOREGROUND_DIM = "#373737"
-    
+
     ACCENT = "#1A1A1A"
     ON_ACCENT = "#737473"
     ON_ACCENT_DIM = "#4A4A4A"
-    
+
     RED = "#d14f3e"
     GREEN = "#3ed14f"
     BLUE = "#3ec0d1"
     ORANGE = "#FFCC99"
     PASTEL_BLUE = "#98f9f9"
+
 
 # Styles
 # -------------------------------------------------------------------------------------------------
@@ -97,6 +99,47 @@ GROUPBOX_STYLE = f"""
     }}
 """
 
+COMBOBOX_STYLE = f"""
+    QComboBox {{
+        border: none;
+        background-color: transparent;
+        padding: 1px 5px 1px 3px;
+    }}
+    QComboBox:focus {{
+        outline: none;
+    }}
+    QComboBox:hover {{
+        background-color: #272727;
+        border-radius: 5px;
+    }}
+    QComboBox::drop-down:button {{
+        background-color: #272727;
+        width: 36px;
+        border: none;
+        border-radius: 5px;
+    }}
+    QComboBox::down-arrow {{
+        image: url(icons:chevron-down.svg);
+    }}
+    QComboBox QAbstractItemView {{
+        background: transparent;
+        border: none;
+        outline: none;
+    }}
+    QComboBox QAbstractItemView::item {{
+    background-color: {UIColors.PRIMARY};
+        height: 40px;
+    }}
+    QComboBox QAbstractItemView::item:hover {{
+        background-color: #272727;
+        border: none;
+    }}
+    QComboBox QAbstractItemView:focus {{
+        outline: none;
+    }}
+"""
+
+
 STATUSBAR_STYLE = f"""
     QStatusBar {{
         background-color: {UIColors.ACCENT};
@@ -133,6 +176,7 @@ class TooltipLabel(QLabel):
             self.setToolTip(tooltip)
             self.setToolTipDuration(0)
 
+
 class FitGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -156,6 +200,7 @@ class FitGraphicsView(QGraphicsView):
         if not self.pixmap_item.pixmap().isNull():
             self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
         super().resizeEvent(event)
+
 
 class PlotWidgetHorizontalCursor:
     def __init__(
@@ -210,9 +255,6 @@ class EMALatencyLabel(QLabel):
         dt = t - self._last_time
         self._avg_dt = (1 - self.alpha) * self._avg_dt + self.alpha * dt
         if self._counter == 0:
-            self.setText(
-                f"{self._name}: <span style='font-weight: bold'>{self._avg_dt:.3f}</span> "
-                f"(<span style='font-weight: bold'>{int(1/self._avg_dt)}</span>)"
-            )
+            self.setText(f"{self._name}: {self._avg_dt:.3f} ({int(1/self._avg_dt)})")
         self._last_time = t
         self._counter = (self._counter + 1) % self._label_update_freq
