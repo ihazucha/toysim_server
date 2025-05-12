@@ -19,15 +19,15 @@ from PySide6.QtWidgets import (
 )
 
 
-from utils.paths import icon_path
+from utils.paths import icon_path, PATH_STATIC
 from utils.env import pdebug
 
 from modules.ui.plots import LatencyPlotWidget
-# from modules.ui.widgets.long_control import LongitudinalControlWidget
-# from modules.ui.widgets.lat_control import LateralControlWidget
+from modules.ui.widgets.long_control import LongitudinalControlWidget
+from modules.ui.widgets.lat_control import LateralControlWidget
 from modules.ui.widgets.encoder import EncoderWidget
 from modules.ui.widgets.playback import PlaybackWidget
-# from modules.ui.widgets.map3d import Map3D
+from modules.ui.widgets.map3d import Map3D
 from modules.ui.widgets.imu3d import IMU3D
 from modules.ui.widgets.imu import IMURawWidget
 from modules.ui.presets import UIColors
@@ -39,6 +39,11 @@ from modules.ui.config_bar import ConfigSidebar
 from modules.ui.toolbar import TopToolBar
 from modules.ui.recorder import RecorderThread, PlaybackThread
 from modules.ui.data import RealDataThread, QSimData, QRealData
+from PySide6.QtCore import QDir
+
+# Register the icon path with Qt's resource system
+# This allows using "icons:filename.png" in QML or stylesheets
+QDir.addSearchPath("icons", PATH_STATIC)
 
 
 # Global config
@@ -152,14 +157,14 @@ class RendererMainWindow(QMainWindow):
     def _init_tab_dashboard_layout(self):
         self.rgb_graphics_view = FitGraphicsView(self)
         self.depth_graphics_view = FitGraphicsView(self)
-        # self.long_control_widget = LongitudinalControlWidget()
-        # self.lat_control_widget = LateralControlWidget()
-        # self.map3d_plot = Map3D()
+        self.long_control_widget = LongitudinalControlWidget()
+        self.lat_control_widget = LateralControlWidget()
+        self.map3d_plot = Map3D()
 
         # Vision & Position
         navigation_group = QGroupBox("Navigation")
         navigation_layout = QVBoxLayout(navigation_group)
-        # navigation_layout.addWidget(self.map3d_plot, stretch=2)
+        navigation_layout.addWidget(self.map3d_plot, stretch=2)
 
         vision_layout = QHBoxLayout()
         vision_layout.addWidget(self.rgb_graphics_view)
@@ -168,22 +173,22 @@ class RendererMainWindow(QMainWindow):
         navigation_layout.addLayout(vision_layout, stretch=1)
 
         # Longitudinal Control
-        # long_control_group = QGroupBox("Longitudinal Control")
-        # long_control_layout = QVBoxLayout(long_control_group)
-        # long_control_layout.addWidget(self.long_control_widget)
+        long_control_group = QGroupBox("Longitudinal Control")
+        long_control_layout = QVBoxLayout(long_control_group)
+        long_control_layout.addWidget(self.long_control_widget)
 
         # Lateral Control
-        # lat_control_group = QGroupBox(title="Lateral Control")
-        # lat_control_layout = QVBoxLayout(lat_control_group)
-        # lat_control_layout.addWidget(self.lat_control_widget)
+        lat_control_group = QGroupBox(title="Lateral Control")
+        lat_control_layout = QVBoxLayout(lat_control_group)
+        lat_control_layout.addWidget(self.lat_control_widget)
 
-        # lat_long_layout = QVBoxLayout()
-        # lat_long_layout.addWidget(long_control_group)
-        # lat_long_layout.addWidget(lat_control_group)
+        lat_long_layout = QVBoxLayout()
+        lat_long_layout.addWidget(long_control_group)
+        lat_long_layout.addWidget(lat_control_group)
 
         main_layout = QHBoxLayout()
         main_layout.addWidget(navigation_group, stretch=1)
-        # main_layout.addLayout(lat_long_layout, stretch=1)
+        main_layout.addLayout(lat_long_layout, stretch=1)
 
         tab1 = QWidget()
         tab1.setLayout(main_layout)
@@ -277,9 +282,9 @@ class RendererMainWindow(QMainWindow):
 
         status_bar.addPermanentWidget(latency_labels_widget)
 
-    # def paintEvent(self, event):
-    # self.gui_latency_label.update()
-    # super().paintEvent(event)
+    def paintEvent(self, event):
+        self.gui_latency_label.update()
+        super().paintEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F11:
@@ -331,11 +336,12 @@ class RendererMainWindow(QMainWindow):
             path=data.raw.roadmarks_data.path,
         )
 
-        self.imu3d_plot.update_data(
-            rotation_quaternion=data.imu_plot.rotation_quaternion,
-            accel=data.imu_plot.accel_linear_avg,
-            gyro=data.imu_plot.gyro_avg,
-        )
+        if hasattr(self, "imu3d_plot"):
+            self.imu3d_plot.update_data(
+                rotation_quaternion=data.imu_plot.rotation_quaternion,
+                accel=data.imu_plot.accel_linear_avg,
+                gyro=data.imu_plot.gyro_avg,
+            )
 
 
 class Renderer:
@@ -357,7 +363,7 @@ class Renderer:
         self.threads = [self.t_real_data, self.t_recorder, self.t_playback]
 
         self.window.playback_widget.frame_changed.connect(self.t_playback.on_frame_index_set)
-        self.window.playback_widget.play_pause_toggled.connect(self.t_playback.on_play_pause_toggle)
+        self.window.playback_widget.play_pause_toggled.connect(self.t_playback.on_play_pause_toggled)
         self.t_playback.frame_ready.connect(self.window.playback_widget.on_next_frame)
         self.t_playback.record_loaded.connect(self.window.playback_widget.on_record_loaded)
 
@@ -366,18 +372,18 @@ class Renderer:
 
         self.window.tab_changed.connect(self.on_tab_changed)
 
-        # self.t_real_data.long_control_plot_data_ready.connect(
-        #     self.window.long_control_widget.update
-        # )
-        # self.t_real_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
+        self.t_real_data.long_control_plot_data_ready.connect(
+            self.window.long_control_widget.update
+        )
+        self.t_real_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
         self.t_real_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
-        # self.t_real_data.camera_rgb_updated_pixmap_ready.connect(
-        #     self.window.depth_graphics_view.update
-        # )
-        # self.t_real_data.data_ready.connect(self.window.update_real_data)
+        self.t_real_data.camera_rgb_updated_pixmap_ready.connect(
+            self.window.depth_graphics_view.update
+        )
+        self.t_real_data.data_ready.connect(self.window.update_real_data)
 
         self.window.top_tool_bar.record_toggled.connect(self.t_recorder.toggle)
-        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.on_play_pause_toggle)
+        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.on_play_pause_toggled)
         self.window.records_sidebar.record_selected.connect(self.t_playback.on_record_set)
 
         # self._autoplay_record()

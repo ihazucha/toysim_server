@@ -56,7 +56,7 @@ class PlaybackThread(QThread):
         self._is_playing = False
         self._is_stopped = False
 
-        self._q = None
+        self._q = messaging.q_real.get_producer()
         self._record = None
         self._record_frames = None
         self._i = 0
@@ -85,19 +85,22 @@ class PlaybackThread(QThread):
     
     @Slot(str)
     def on_record_set(self, record_name: str):
+        print(f"[PB Data] on_record_set {record_name}")
         self._is_stopped = True
         self._is_playing = False
+        self._i = 0
         self._load_record(record_name)
-        self._init_data_queue()
         self._play_frame(0)
     
     @Slot(int)
     def on_frame_index_set(self, index: int):
+        print(f"[PB Data] on_frame_index_set {index}")
         self._i = index
         self._play_frame(index)
         
     @Slot(bool)
-    def on_play_pause_toggle(self, play: bool):
+    def on_play_pause_toggled(self, play: bool):
+        print(f"[PB Data] on_play_pause_toggle {play}")
         self._is_playing = play
 
     def _load_record(self, record_name: str):
@@ -114,10 +117,6 @@ class PlaybackThread(QThread):
         except Exception as e:
             print(f"[E] [PlaybackThread] Error while loading record: {e}")
 
-    def _init_data_queue(self):
-        self._q = messaging.q_real.get_producer()
-        sleep(0.1)
-
     def _play_frame(self, index: int):
         data = self._record_frames[index].original
         self._q.put(data.to_bytes())
@@ -129,22 +128,30 @@ class PlaybackThread(QThread):
             print(f"[Playback] Record {self._record.name} is empty or invalid")
             return
         
-        # Hack for the i + 1
-        self._record_frames.append(self._record_frames[-1])
-        end = self._record.frames_count
-
         self._is_stopped = False
+        self._i = 0
+        end = self._record.frames_count - 1
+
         while self._i < end:
             if self._is_stopped:
                 break
             while not self._is_playing:
                 sleep(0.05)
 
-            data = self._record_frames[self._i].original
-            uiframe = UIFrame(index=self._i, timestamp=data.timestamp)
-            self.frame_ready.emit(uiframe)
-            self._q.put(data.to_bytes())
+            self._emit_frame(self._i)
+
+            frame_data = self._record_frames[self._i].original
+            next_frame_data = self._record_frames[self._i + 1].original
+            sleep((next_frame_data.timestamp - frame_data.timestamp) / 1e9)
             
-            next_data = self._record_frames[self._i + 1].original
-            sleep((next_data.timestamp - data.timestamp) / 1e9)
             self._i += 1
+        # Last frame
+        self._emit_frame(self._i)
+
+    def _emit_frame(self, index):
+        data = self._record_frames[index].original
+        uiframe = UIFrame(index=index, timestamp=data.timestamp)
+        self.frame_ready.emit(uiframe)
+        self._q.put(data.to_bytes())
+
+

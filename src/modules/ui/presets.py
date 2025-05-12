@@ -148,8 +148,8 @@ class FitGraphicsView(QGraphicsView):
     def update(self, pixmap):
         """Set the pixmap and fit it to the view."""
         self.pixmap_item.setPixmap(pixmap)
-        # if not pixmap.isNull():
-            # self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+        if not pixmap.isNull():
+            self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
 
     def resizeEvent(self, event):
         # """Scale the pixmap when the view is resized."""
