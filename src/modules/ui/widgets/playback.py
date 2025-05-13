@@ -30,8 +30,6 @@ from fonticon_mdi7 import MDI7
 from PySide6.QtCore import QDir
 from utils.paths import PATH_STATIC
 
-# Register the icon path with Qt's resource system
-# This allows using "icons:filename.png" in QML or stylesheets
 QDir.addSearchPath("icons", PATH_STATIC)
 
 

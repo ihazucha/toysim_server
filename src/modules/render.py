@@ -72,6 +72,18 @@ class RendererMainWindow(QMainWindow):
         event.accept()
 
     def init(self):
+        # Layout
+        self.central_widget = QWidget()
+        self.central_widget.setContentsMargins(0, 0, 0, 0)
+        # central_widget.setStyleSheet("* {background-color: rgba(0, 10, 0, 40); border: 1px solid; border-color: rgba(0, 255, 0, 40)}")
+        central_layout = QVBoxLayout(self.central_widget)
+        central_layout.setContentsMargins(0, -5, 0, 0)
+        central_layout.setSpacing(0)
+
+        self.setCentralWidget(self.central_widget)
+        self.setWindowTitle("ToySim UI")
+        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
+
         # Widgets
         self.tabs = self._init_tabs()
         self.config_sidebar = self._init_config_sidebar()
@@ -80,24 +92,14 @@ class RendererMainWindow(QMainWindow):
         self.playback_widget = self._init_playback_bar()
         self._init_status_bar()
 
-        w = QWidget()
-        # w.setStyleSheet("* {background-color: rgba(0, 10, 0, 40); border: 1px solid; border-color: rgba(0, 255, 0, 40)}")
-        w.setContentsMargins(0, 0, 0, 0)
-        central_layout = QVBoxLayout(w)
-        central_layout.setContentsMargins(0, -5, 0, 0)
-        central_layout.setSpacing(0)
         central_layout.addWidget(self.tabs)
         central_layout.addWidget(self.playback_widget)
-
-        # Setup
-        self.setWindowTitle("ToySim UI")
-        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
-        self.setCentralWidget(w)
-        self.showNormal()
 
         # Signals
         self.records_sidebar.record_selected.connect(self.top_tool_bar.on_record_selected)
         self.records_sidebar.record_selected.connect(lambda: self.playback_widget.show() if self.playback_widget.isHidden() else None)
+
+        self.showNormal()
 
     def _init_records_sidebar(self):
         rsb = RecordsSidebar(self)
@@ -117,7 +119,7 @@ class RendererMainWindow(QMainWindow):
     def _init_top_toolbar(self, config_sidebar, records_sidebar):
         ttb = TopToolBar(parent=self.centralWidget())
         self.addToolBar(Qt.TopToolBarArea, ttb)
-        ttb.config_panel_toggled.connect(lambda: toggle_widget(config_sidebar))
+        ttb.control_panel_toggled.connect(lambda: toggle_widget(config_sidebar))
         ttb.records_panel_toggled.connect(lambda: toggle_widget(records_sidebar))
         return ttb
 
@@ -388,7 +390,6 @@ class Renderer:
         self.t_real_data.data_ready.connect(self.window.update_real_data)
 
         self.window.top_tool_bar.record_toggled.connect(self.t_recorder.toggle)
-        self.window.top_tool_bar.playback_toggled.connect(self.t_playback.on_play_pause_toggled)
         self.window.records_sidebar.record_selected.connect(self.t_playback.on_record_set)
 
         # self._autoplay_record()
@@ -438,4 +439,3 @@ class Renderer:
 
     def _autoplay_record(self, record: str = "1745511004652250500"):
         self.window.records_sidebar.record_selected.emit(record)
-        self.window.top_tool_bar.playback_toggled.emit(True)
