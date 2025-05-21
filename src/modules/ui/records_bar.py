@@ -97,7 +97,6 @@ class RecordsSidebar(QDockWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Records")
-        # self.setFixedWidth(200)
 
         widget = QWidget()
         self.layout = QVBoxLayout(widget)
@@ -115,14 +114,19 @@ class RecordsSidebar(QDockWidget):
             QListWidget {{
                 background-color: {UIColors.SECONDARY};
                 border: none;
-                padding: 5px;
+                padding-left: 10px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                padding-right: 0px;
+                margin-left: 0px;
+
             }}
             QListWidget::item {{
                 background-color: {UIColors.ACCENT};
-                color: red;
                 border: 1px solid {UIColors.ON_FOREGROUND_DIM};
                 border-radius: 5px;
-                margin-bottom: 5px;
+                margin-bottom: 8px;
+                margin-right: 5px;
             }}
             QListWidget::item:selected {{
                 background-color: {UIColors.FOREGROUND};
@@ -169,7 +173,6 @@ class RecordsSidebar(QDockWidget):
     def add_record(self, record_timestamp: str):
         data = None
         for data_cls in [ProcessedRealData, ProcessedSimData]:
-            print(data_cls)
             try:
                 data = RecordReader.read_one(record_path(record_timestamp), ProcessedRealData)
             except UnpicklingError as e:
@@ -223,6 +226,16 @@ class RecordsSidebar(QDockWidget):
         copy_action = QAction("Copy Timestamp", self)
         copy_action.triggered.connect(lambda: self._copy_timestamp(item))
         context_menu.addAction(copy_action)
+
+        open_location_action = QAction("Open File Location", self)
+        open_location_action.triggered.connect(lambda: os.startfile(os.path.dirname(record_path(item.data(CustomListItemRoles.ID)))))
+        context_menu.addAction(open_location_action)
+
+        context_menu.addSeparator() # Add a separator for better visual grouping
+
+        reload_action = QAction("Reload Records", self)
+        reload_action.triggered.connect(self.load_records)
+        context_menu.addAction(reload_action)
 
         # Show menu at cursor position
         global_pos = self.record_list.mapToGlobal(position)

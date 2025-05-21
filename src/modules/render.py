@@ -5,7 +5,6 @@ from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
-    QDockWidget,
     QMainWindow,
     QVBoxLayout,
     QHBoxLayout,
@@ -14,12 +13,9 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QLabel,
     QGroupBox,
-    QSlider,
-    QPushButton
 )
 
 
-from utils.paths import icon_path, PATH_STATIC
 from utils.env import pdebug
 
 from modules.ui.plots import LatencyPlotWidget
@@ -30,21 +26,14 @@ from modules.ui.widgets.playback import PlaybackWidget
 from modules.ui.widgets.map3d import Map3D
 from modules.ui.widgets.imu3d import IMU3D
 from modules.ui.widgets.imu import IMURawWidget
-from modules.ui.presets import UIColors
 from modules.messaging import messaging
 from modules.ui.settings import WindowSettings
-from modules.ui.presets import Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
-from modules.ui.records_bar import RecordsSidebar, RecordItemWidget
+from modules.ui.presets import UIColors, QSSDebug, Fonts, FitGraphicsView, EMALatencyLabel, toggle_widget, APP_STYLE
+from modules.ui.records_bar import RecordsSidebar
 from modules.ui.config_bar import ConfigSidebar
 from modules.ui.toolbar import TopToolBar
 from modules.ui.recorder import RecorderThread, PlaybackThread
-from modules.ui.data import RealDataThread, QSimData, QRealData
-from PySide6.QtCore import QDir
-
-# Register the icon path with Qt's resource system
-# This allows using "icons:filename.png" in QML or stylesheets
-QDir.addSearchPath("icons", PATH_STATIC)
-
+from modules.ui.data import RealDataThread, QSimData, QRealData, SimDataThread
 
 # Global config
 # -------------------------------------------------------------------------------------------------
@@ -57,12 +46,13 @@ QtGui.QSurfaceFormat.setDefaultFormat(sfmt)
 # UI
 # -------------------------------------------------------------------------------------------------
 
-
 class RendererMainWindow(QMainWindow):
     tab_changed = Signal(int, str)
 
     def __init__(self):
         super().__init__()
+
+        self.qssdebug = QSSDebug(widget=QApplication.instance())
 
         self.settings = WindowSettings(self)
         self.settings.load()
@@ -75,14 +65,13 @@ class RendererMainWindow(QMainWindow):
         # Layout
         self.central_widget = QWidget()
         self.central_widget.setContentsMargins(0, 0, 0, 0)
-        # central_widget.setStyleSheet("* {background-color: rgba(0, 10, 0, 40); border: 1px solid; border-color: rgba(0, 255, 0, 40)}")
         central_layout = QVBoxLayout(self.central_widget)
-        central_layout.setContentsMargins(0, -5, 0, 0)
+        central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
 
         self.setCentralWidget(self.central_widget)
         self.setWindowTitle("ToySim UI")
-        self.setWindowIcon(QIcon(icon_path("toysim_icon")))
+        self.setWindowIcon(QIcon("icons:toysim_icon.png"))
 
         # Widgets
         self.tabs = self._init_tabs()
@@ -96,14 +85,13 @@ class RendererMainWindow(QMainWindow):
         central_layout.addWidget(self.playback_widget)
 
         # Signals
-        self.records_sidebar.record_selected.connect(self.top_tool_bar.on_record_selected)
         self.records_sidebar.record_selected.connect(lambda: self.playback_widget.show() if self.playback_widget.isHidden() else None)
-
         self.showNormal()
 
     def _init_records_sidebar(self):
         rsb = RecordsSidebar(self)
         self.addDockWidget(Qt.LeftDockWidgetArea, rsb)
+        rsb.hide()
         return rsb
 
     def _init_config_sidebar(self):
@@ -129,6 +117,13 @@ class RendererMainWindow(QMainWindow):
         tabs.setMovable(False)
         tabs.setDocumentMode(True)
         tabs.setTabPosition(QTabWidget.North)
+        tabs.setStyleSheet(
+            """
+            QTabWidget::tab-bar {
+                left: 8px; /* move to the right by 5px */
+            }
+            """
+        )
 
         tab_dashboard = self._init_tab_dashboard_layout()
         tabs.addTab(tab_dashboard, "Dashboard")
@@ -136,6 +131,9 @@ class RendererMainWindow(QMainWindow):
         # Lazy loading of the sensors tab
         self.sensors_tab_placeholder = QWidget()
         tabs.addTab(self.sensors_tab_placeholder, "Sensors")
+
+        tab_system = self._init_tab_system_layout()
+        tabs.addTab(tab_system, "System")
 
         tabs.currentChanged.connect(self._handle_tab_changed)
 
@@ -253,11 +251,11 @@ class RendererMainWindow(QMainWindow):
         return tab
 
     def _init_tab_system_layout(self):
-        self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
+        # self.processor_period_plot = LatencyPlotWidget(name="T Processor", fps_target=30)
         self.processor_dt_plot = LatencyPlotWidget(name="dt Processor", fps_target=30)
 
         left_layout = QVBoxLayout()
-        left_layout.addWidget(self.processor_period_plot)
+        # left_layout.addWidget(self.processor_period_plot)
         left_layout.addWidget(self.processor_dt_plot)
 
         layout = QHBoxLayout()
@@ -289,13 +287,19 @@ class RendererMainWindow(QMainWindow):
         status_bar.addPermanentWidget(latency_labels_widget)
 
     def paintEvent(self, event):
-        self.gui_latency_label.update()
+        if hasattr(self, "gui_latency_label"):
+            self.gui_latency_label.update()
         super().paintEvent(event)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_F11:
+        if event.key() == Qt.Key.Key_F9:
+            self.qssdebug.toggle()
+            event.accept()
+        elif event.key() == Qt.Key_F11:
             self.showNormal() if self.isFullScreen() else self.showFullScreen()
-        super().keyPressEvent(event)
+            event.accept()  # Accept the event as it's handled
+        else:
+            super().keyPressEvent(event)
 
     def update_simulation_data(self, data: QSimData):
         rgb_pixmap = QPixmap.fromImage(data.rgb_qimage)
@@ -304,9 +308,9 @@ class RendererMainWindow(QMainWindow):
         depth_pixmap = QPixmap.fromImage(data.depth_qimage)
         self.depth_graphics_view.update(depth_pixmap)
 
-        period_ms = data.processor_period_ns / 1e6
-        self.processor_period_plot.update(dt_ms=period_ms)
-        dt_ms = data.processor_dt_ns / 1e6
+        # period_ms = data.processor_period_ns / 1e6
+        # self.processor_period_plot.update(dt_ms=period_ms)
+        dt_ms = data.raw.original.dt * 1e3
         self.processor_dt_plot.update(dt_ms=dt_ms)
 
         # TODO: calculate offsets dynamically:
@@ -315,19 +319,19 @@ class RendererMainWindow(QMainWindow):
             car_x=0,
             car_y=0,
             car_heading=0,
-            car_steering_angle=data.raw.original.vehicle.steering_angle,
+            car_steering_angle=-data.raw.original.vehicle.steering_angle,
             roadmarks=data.raw.roadmarks_data.roadmarks / 400,
             path=data.raw.roadmarks_data.path / 400,
         )
 
-        self.long_control_widget.update(
-            measured_speed=data.raw.original.vehicle.speed,
-            target_speed=0,
-            engine_power_percent=0,
-        )
-        self.lat_control_widget.update(
-            steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
-        )
+        # self.long_control_widget.update(
+        #     measured_speed=data.raw.original.vehicle.speed,
+        #     target_speed=0,
+        #     engine_power_percent=0,
+        # )
+        # self.lat_control_widget.update(
+        #     steering_deg=data.raw.original.vehicle.steering_angle, set_steering_deg=0
+        # )
 
     def update_real_data(self, data: QRealData):
         # App Window
@@ -363,10 +367,17 @@ class Renderer:
         self.window = RendererMainWindow()
         self.window.init()
 
-        self.t_recorder = RecorderThread(data_queue=messaging.q_processing)
+        self.t_recorder = RecorderThread()
         self.t_playback = PlaybackThread()
+        self.t_sim_data = SimDataThread()
         self.t_real_data = RealDataThread()
-        self.threads = [self.t_real_data, self.t_recorder, self.t_playback]
+        self.threads = [
+            self.t_real_data,
+            self.t_sim_data,
+            self.t_recorder,
+            self.t_playback
+        ]
+        self.t_sim_data.data_ready.connect(self.window.update_simulation_data)
 
         self.window.playback_widget.frame_changed.connect(self.t_playback.on_frame_index_set)
         self.window.playback_widget.play_pause_toggled.connect(self.t_playback.on_play_pause_toggled)
@@ -383,6 +394,10 @@ class Renderer:
             self.window.long_control_widget.update
         )
         self.t_real_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
+        self.t_sim_data.long_control_plot_data_ready.connect(
+            self.window.long_control_widget.update
+        )
+        self.t_sim_data.lat_control_plot_data_ready.connect(self.window.lat_control_widget.update)
         self.t_real_data.camera_rgb_pixmap_ready.connect(self.window.rgb_graphics_view.update)
         self.t_real_data.camera_rgb_updated_pixmap_ready.connect(
             self.window.depth_graphics_view.update
@@ -412,6 +427,8 @@ class Renderer:
             ),
             (self.t_real_data.lr_encoder_plot_data_ready, self.window.left_encoder_plot.update),
             (self.t_real_data.rr_encoder_plot_data_ready, self.window.right_encoder_plot.update),
+            (self.t_real_data.camera_rgb_pixmap_ready, self.window.camera_rgb_view.update),
+            (self.t_real_data.camera_rgb_updated_pixmap_ready, self.window.camera_depth_view.update),
         ]
 
         for signal, slot in imu_signals_slots:

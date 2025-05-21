@@ -3,19 +3,27 @@ from time import sleep, time_ns
 from PySide6.QtCore import QThread, Signal, Slot
 
 from modules.recorder import RecordReader, RecordWriter
-from datalink.ipc import SPMCQueue
-from datalink.data import ProcessedRealData
+from datalink.data import ProcessedRealData, ProcessedSimData
 from utils.paths import record_path
 
 from modules.messaging import messaging
 
 class RecorderThread(QThread):
-    def __init__(self, data_queue: SPMCQueue):
+    def __init__(self):
         super().__init__()
         self._is_running = False
         self._is_recording = False
-        self._record_writer = RecordWriter(data_queue)
+        active_q = self._get_active_queue()
+        self._record_writer = RecordWriter(recorded_queue=active_q)
 
+    # TODO: Figure out a better mechanism to do this
+    def _get_active_queue(self):
+        for q in [messaging.q_real_processing, messaging.q_sim_processing]:
+            c = q.get_consumer()
+            if c.poll(timeout=50) is not None:
+                return q
+        return None
+        
     def run(self):
         self._is_running = True
         while self._is_running and not self.isInterruptionRequested():
@@ -56,8 +64,11 @@ class PlaybackThread(QThread):
         self._is_playing = False
         self._is_stopped = False
 
-        self._q = messaging.q_real.get_producer()
+        self._real_q = messaging.q_real.get_producer()
+        self._sim_q = messaging.q_sim.get_producer()
+        self._q = None
         self._record = None
+        self._record_dtype = None
         self._record_frames = None
         self._i = 0
         self._start_i = 0
@@ -110,16 +121,29 @@ class PlaybackThread(QThread):
         self._start_i = start
         self._end_i = end
 
+    # TODO: this is horrible - data should be stored in a manner that does not require
+    # structures - skew more towards ROS-like topics
+    def _get_record_type(self, record_path):
+        try:
+            self._record_frame = RecordReader.read_one(record_path, ProcessedSimData)
+            _ = self._record_frame.original.dt
+            return ProcessedSimData
+        except:
+            return ProcessedRealData
+
     def _load_record(self, record_name: str):
         try:
             path = record_path(record_name)
-            self._record_frames = RecordReader.read_all(path, ProcessedRealData)
+            self._record_dtype = self._get_record_type(path)
+            self._q = self._real_q if self._record_dtype == ProcessedRealData else self._sim_q
+            self._record_frames = RecordReader.read_all(path, self._record_dtype)
             self._record = UIRecord(
                 name=record_name,
                 frames_count=len(self._record_frames),
                 first_timestamp=self._record_frames[0].original.timestamp,
                 last_timestamp=self._record_frames[-1].original.timestamp
             )
+                
             self.record_loaded.emit(self._record)
             self._end_i = self._record.frames_count - 1
         except Exception as e:
@@ -149,7 +173,8 @@ class PlaybackThread(QThread):
 
             frame_data = self._record_frames[self._i].original
             next_frame_data = self._record_frames[self._i + 1].original
-            sleep((next_frame_data.timestamp - frame_data.timestamp) / 1e9)
+            dt = (next_frame_data.timestamp - frame_data.timestamp) / 1e9
+            sleep(dt)
             
             self._i += 1
         # Last frame

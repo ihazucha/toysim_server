@@ -1,14 +1,14 @@
-from datalink.ipc import SPMCQueue, SPMCQueueType
+from datalink.ipc import SPMCQueue, MPMCQueue, AddrType
 
 # TODO: make into a singleton
-
 class Messaging:
     def __init__(self):
-        self.q_sim = SPMCQueue(name="simulation", type=SPMCQueueType.TCP, port=10001)
-        self.q_real = SPMCQueue(name="real", type=SPMCQueueType.TCP, port=10002)
-        self.q_processing = SPMCQueue(name="processing", type=SPMCQueueType.TCP, port=10003)
-        self.q_control = SPMCQueue(name="control", type=SPMCQueueType.TCP, port=10004)
-        self.q_ui = SPMCQueue(name="ui", type=SPMCQueueType.TCP, port=10005)
-        
-        
+        self.q_sim = MPMCQueue(name="sim", addr_type=AddrType.TCP, ports=(11001, 11002), q_size=10)
+        self.q_real = MPMCQueue(name="real", addr_type=AddrType.TCP, ports=(11001, 11002), q_size=10)
+        # self.q_real = SPMCQueue(name="real", type=AddrType.TCP, port=10002)
+        self.q_sim_processing = SPMCQueue(name="sim_processing", type=AddrType.TCP, port=10030)
+        self.q_real_processing = SPMCQueue(name="real_processing", type=AddrType.TCP, port=10040)
+        self.q_control = SPMCQueue(name="control", type=AddrType.TCP, port=10050)
+        self.q_ui = SPMCQueue(name="ui", type=AddrType.TCP, port=10060)
+
 messaging = Messaging()

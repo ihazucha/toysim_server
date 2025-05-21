@@ -1,18 +1,18 @@
 import struct
 from datalink.data import Serializable
 
-from datalink.ipc import SPMCQueue
+from datalink.ipc import AbstractQueue
 
 # TODO: create a data format such that all relevant (meta)data are stored:
 # - type of client, configuration, settings, datetime, measurement & algorithm data
 
 class RecordWriter:
-    def __init__(self, data_queue: SPMCQueue):
+    def __init__(self, recorded_queue: AbstractQueue):
         self._running = False
-        self._data_queue = data_queue
+        self._q = recorded_queue
 
     def write_new(self, file):
-        q = self._data_queue.get_consumer()
+        q = self._q.get_consumer()
         self._running = True
         with open(file, "wb") as f:
             while self._running:

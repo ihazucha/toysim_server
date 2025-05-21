@@ -66,3 +66,8 @@ Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>
 - superqt
   - https://pyapp-kit.github.io/superqt/
 - pip install fonticon-materialdesignicons7
+
+- Describe engines:
+  - https://github.com/o3de/o3de
+  - NVIDIA ISAAC
+  - https://github.com/projectchrono/chrono

@@ -1,8 +1,9 @@
 import numpy as np
 from typing import Iterable
 from time import perf_counter
+from enum import StrEnum
 
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QIcon
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget,
@@ -14,7 +15,11 @@ from PySide6.QtWidgets import (
 )
 
 from pyqtgraph import PlotWidget, mkPen, InfiniteLine
+from PySide6.QtGui import QPixmap, QPainter
 
+from PySide6.QtCore import QDir
+from utils.paths import PATH_STATIC
+QDir.addSearchPath("icons", PATH_STATIC)
 
 # Theme
 # -------------------------------------------------------------------------------------------------
@@ -40,6 +45,7 @@ class GLColors:
 
 class UIColors:
     PRIMARY = "#202020"
+    PRIMARY_BUTTON_HOVER = "#272727"
     ON_PRIMARY = "#919090"
 
     SECONDARY = "#1E1E1E"
@@ -66,6 +72,21 @@ class UIColors:
 MAIN_WINDOW_STYLE = f"""
     QMainWindow {{
         background-color: {UIColors.PRIMARY};
+    }}
+"""
+
+DOCK_WIDGET_STYLE = f"""
+    QDockWidget {{
+        background: {UIColors.SECONDARY};
+        border: 1px solid {UIColors.ON_FOREGROUND_DIM};
+        border-radius: 8px;
+    }}
+    QDockWidget::title {{
+        background: {UIColors.ACCENT};
+        color: {UIColors.ON_ACCENT};
+        padding: 6px 6px;
+        font-weight: bold;
+        font-size: 12;
     }}
 """
 
@@ -109,11 +130,11 @@ COMBOBOX_STYLE = f"""
         outline: none;
     }}
     QComboBox:hover {{
-        background-color: #272727;
+        background-color: {UIColors.PRIMARY_BUTTON_HOVER};
         border-radius: 5px;
     }}
     QComboBox::drop-down:button {{
-        background-color: #272727;
+        background-color: {UIColors.PRIMARY_BUTTON_HOVER};
         width: 36px;
         border: none;
         border-radius: 5px;
@@ -131,7 +152,7 @@ COMBOBOX_STYLE = f"""
         height: 40px;
     }}
     QComboBox QAbstractItemView::item:hover {{
-        background-color: #272727;
+        background-color: {UIColors.PRIMARY_BUTTON_HOVER};
         border: none;
     }}
     QComboBox QAbstractItemView:focus {{
@@ -149,12 +170,38 @@ STATUSBAR_STYLE = f"""
 
 APP_STYLE_LIST = [
     MAIN_WINDOW_STYLE,
+    DOCK_WIDGET_STYLE,
     TOOLTIP_STYLE,
     GROUPBOX_STYLE,
     STATUSBAR_STYLE,
 ]
 
 APP_STYLE = "\n".join(APP_STYLE_LIST)
+
+
+# Debug
+# -------------------------------------------------------------------------------------------------
+
+class QSSDebug:
+    """Adds """
+    def __init__(self, widget: QWidget):
+        self.widget = widget
+        self.is_active = False
+        self.debug_qss = """* {
+            background-color: rgba(0, 155, 0, 25);
+            /*border: 1px solid;
+            border-color: rgba(0, 255, 0, 25);*/
+        }"""
+        self.original_qss = ""
+
+    def toggle(self):
+        if not self.is_active:
+            self.original_qss = self.widget.styleSheet()
+            self.widget.setStyleSheet(self.original_qss + self.debug_qss)
+            self.is_active = True
+        else:
+            self.widget.setStyleSheet(self.original_qss)
+            self.is_active = False
 
 
 # Helpers
@@ -164,6 +211,13 @@ APP_STYLE = "\n".join(APP_STYLE_LIST)
 def toggle_widget(w: QWidget):
     w.close() if w.isVisible() else w.show()
 
+def svg_icon(name: str):
+    pixmap = QPixmap(f"icons:{name}.svg")
+    painter = QPainter(pixmap)
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), UIColors.ON_PRIMARY)
+    painter.end()
+    return QIcon(pixmap)
 
 # Widgets
 # -------------------------------------------------------------------------------------------------
@@ -242,7 +296,7 @@ class EMALatencyLabel(QLabel):
         self._name = name
         self._label_update_freq = label_update_freq
 
-        super().__init__(f"{self._name} FPS: --")
+        super().__init__(f"{self._name}: --")
         self.setStyleSheet(f"color: {UIColors.ON_FOREGROUND};")
 
         self._last_time = perf_counter()

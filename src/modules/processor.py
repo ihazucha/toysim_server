@@ -76,14 +76,14 @@ def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitCon
 
     # Roadmark dots
     for u, v in planner.roadmarks_imgframe:
-        cv2.circle(image_copy, (u, v), 5, (0, 255, 0), -1)
+        cv2.circle(image_copy, (u, v), 5, (23, 155, 93), -1)
 
     path_imgframe = [
         planner.camera.xyzw_roadframe2uv(np.array([*xy, 0, 1]))[:2] for xy in planner.path_roadframe
     ]
     # Planned path
     for i in range(len(path_imgframe) - 1):
-        cv2.line(image_copy, path_imgframe[i], path_imgframe[i + 1], (0, 255, 0), 2)
+        cv2.line(image_copy, path_imgframe[i], path_imgframe[i + 1], (23, 155, 93), 2)
 
     # PurePursuit goal
     if controller.pp.track_point:
@@ -164,14 +164,14 @@ class Processor(Process):
         planner = RoadmarksPlanner(
             camera=camera,
             filter=HSVColorFilter.new_red(),
-            config=RoadmarksPlannerConfig(roadmark_min_area=11, roadmark_max_count=6),
+            config=RoadmarksPlannerConfig(roadmark_min_area=11, roadmark_max_count=6, roadmark_max_distance=100000),
         )
         
         controller_config = PurePursuitConfig.new_simulation()
         controller = PurePursuitController(config=controller_config)
         
         q_simulation = messaging.q_sim.get_consumer()
-        q_processing = messaging.q_processing.get_producer()
+        q_processing = messaging.q_sim_processing.get_producer()
         q_control = messaging.q_control.get_producer()
 
         start_apply_ui_config_thread(controller)
@@ -195,6 +195,7 @@ class Processor(Process):
             rm_data = RoadmarksData(roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe)
             p_data = ProcessedSimData(
                 begin_timestamp=q_simulation.last_get_timestamp,
+                control_data=c_data,
                 debug_image=debug_image,
                 depth=depth,
                 roadmarks_data=rm_data,
@@ -204,7 +205,7 @@ class Processor(Process):
 
     def _run_real_roadmarks(self):
         # TODO: obtain data about the camera from the system
-        image_shape = (820, 616)
+        image_shape = (3280 // 4, 2464 // 4)
         camera = Camera(
             pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, 0.01, 0)),
             image_shape=image_shape,
@@ -219,11 +220,12 @@ class Processor(Process):
 
         q_control = messaging.q_control.get_producer()
         q_real = messaging.q_real.get_consumer()
-        q_processing = messaging.q_processing.get_producer()
+        q_processing = messaging.q_real_processing.get_producer()
 
         # Sync
         _ = RealData.from_bytes(q_real.get())
-        remote_controller.connect()
+        # TODO: the controller lib can hang trying to connect, init in separate thread
+        # remote_controller.connect()
 
         while True:
             data: RealData = RealData.from_bytes(q_real.get())

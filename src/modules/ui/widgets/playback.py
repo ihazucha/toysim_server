@@ -4,33 +4,24 @@ sys.path.append("C:/Users/ihazu/Desktop/projects/toysim_server/src")
 
 from time import sleep, time_ns
 from typing import Iterable
-from enum import IntEnum
 
 from modules.ui.presets import COMBOBOX_STYLE, UIColors
 
 from PySide6.QtWidgets import (
     QWidget,
     QMainWindow,
-    QVBoxLayout,
-    QHBoxLayout,
     QGridLayout,
     QSlider,
     QPushButton,
-    QLabel,
     QApplication,
     QComboBox,
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QKeyCombination, QSize
 from datetime import datetime
 
-from superqt import QLabeledRangeSlider, QEnumComboBox
+from superqt import QLabeledRangeSlider
 from superqt.fonticon import icon
 from fonticon_mdi7 import MDI7
-
-from PySide6.QtCore import QDir
-from utils.paths import PATH_STATIC
-
-QDir.addSearchPath("icons", PATH_STATIC)
 
 
 # Foos
@@ -196,7 +187,7 @@ class PlaybackWidget(QWidget):
         self.frame_indicator_select = QComboBox()
         self.frame_indicator_select.setStyleSheet(COMBOBOX_STYLE)
         self.frame_indicator_select.setMinimumWidth(155)
-        self.frame_indicator_select.setFixedHeight(42)
+        self.frame_indicator_select.setFixedHeight(44)
         self.frame_indicator_select.addItem("00:00.000 / 00:00.000")
         self.frame_indicator_select.addItem("0 / 0")
 

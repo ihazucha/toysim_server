@@ -197,32 +197,50 @@ class QRealData:
 
 class SimDataThread(QThread):
     data_ready = Signal(QSimData)
+    long_control_plot_data_ready = Signal(LongControlPlotData)
+    lat_control_plot_data_ready = Signal(LatControlPlotData)
 
     def __init__(self):
         super().__init__()
 
+        self.long_control_plot_data = LongControlPlotData()
+        self.lat_control_plot_data = LatControlPlotData()
+
     def run(self):
-        q_processing = messaging.q_processing.get_consumer()
+        q = messaging.q_sim_processing.get_consumer()
         last_put_timestamp = time_ns()
         self._is_running = True
 
         while self._is_running and not self.isInterruptionRequested():
-            data: ProcessedSimData = q_processing.get(100)
+            data: ProcessedSimData = q.get(100)
             if data is None:
                 continue
             qsim_data = QSimData(raw=data)
             qsim_data.rgb_qimage = rgb2qimg(data.debug_image)
             qsim_data.depth_qimage = depth2qimg(data.depth)
-            qsim_data.processor_period_ns = q_processing.last_put_timestamp - last_put_timestamp
-            qsim_data.processor_dt_ns = q_processing.last_put_timestamp - data.begin_timestamp
-            last_put_timestamp = q_processing.last_put_timestamp
+            qsim_data.processor_period_ns = q.last_put_timestamp - last_put_timestamp
+            qsim_data.processor_dt_ns = q.last_put_timestamp - data.begin_timestamp
+            last_put_timestamp = q.last_put_timestamp
+
+            self.long_control_plot_data.update(
+                data.original.vehicle.speed / 100,
+                data.control_data.speed * 20 * 20,
+                data.original.vehicle.speed / 22,
+            )
+            self.long_control_plot_data_ready.emit(self.long_control_plot_data)
+
+            self.lat_control_plot_data.update(
+                data.original.vehicle.steering_angle,
+                data.control_data.steering_angle,
+                data.original.vehicle.steering_angle,
+            )
+            self.lat_control_plot_data_ready.emit(self.lat_control_plot_data)
 
             self.data_ready.emit(qsim_data)
 
     def stop(self):
         self._is_running = False
         self.quit()
-
 
 class RealDataThread(QThread):
     data_ready = Signal(QRealData)
@@ -250,7 +268,7 @@ class RealDataThread(QThread):
         self.imu_plot_data = IMUPlotData()
 
     def run(self):
-        q = messaging.q_processing.get_consumer()
+        q = messaging.q_real_processing.get_consumer()
         self._is_running = True
 
         while self._is_running and not self.isInterruptionRequested():

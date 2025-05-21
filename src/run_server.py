@@ -12,8 +12,11 @@ def parse_args():
     parser.add_argument("-i", "--ip", type=str, default=get_local_ip(), help="Server IP")
     parser.add_argument("--sim_port", type=int, default=8888, help="Server port for simulation")
     parser.add_argument("--real_port", type=int, default=9999, help="Server port for real vehicle")
-    parser.add_argument("-c", "--controller", type=str, required=True, choices=[c.value for c in ControllerType])
+    parser.add_argument(
+        "-c", "--controller", type=str, required=True, choices=[c.value for c in ControllerType]
+    )
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -29,10 +32,13 @@ def main():
         p_sim_server,
         p_real_server,
         p_processor,
+        # TODO: figure out a cleaner way to run MPMCQueue on Windows (e.g. singleton using file lock...)
+        msg.q_sim.get_proxy(),
     ]
 
     [p.start() for p in processes]
     [p.join() for p in processes]
+
 
 if __name__ == "__main__":
     main()

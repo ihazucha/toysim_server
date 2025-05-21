@@ -172,7 +172,8 @@ class SpeedPlotWidget(PlotWidget):
 
         # TODO: does not work but keep it this way until data refactor is resolved
         if self._rescale_counter == 0:
-            self._update_y_scale()
+            ...
+            # self._update_y_scale()
         self._rescale_counter = (self._rescale_counter + 1) % self._rescale_frequency
 
     def _update_y_scale(self):
