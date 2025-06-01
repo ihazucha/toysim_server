@@ -8,7 +8,7 @@ from scipy.interpolate import splprep, splev
 # TODO: check for polyfit properly
 import warnings
 
-warnings.simplefilter("ignore", np.RankWarning)
+# warnings.simplefilter("ignore", np.RankWarning)
 
 
 # Camera

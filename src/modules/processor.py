@@ -216,7 +216,7 @@ class Processor(Process):
 
         controller_config = PurePursuitConfig.new_alamak()
         controller = PurePursuitController(config=controller_config)
-        remote_controller = DualSense()
+        # remote_controller = DualSense()
 
         q_control = messaging.q_control.get_producer()
         q_real = messaging.q_real.get_consumer()
@@ -243,11 +243,11 @@ class Processor(Process):
             # print(servo_corrected_steering_angle)
             c_data = ControlData(controller.timestamp, speed, servo_corrected_steering_angle)
 
-            if remote_controller.update():
-                if remote_controller.is_v_nonzero():
-                    c_data.speed = remote_controller.v
-                if remote_controller.is_sa_nonzero():
-                    c_data.steering_angle = -remote_controller.sa
+            #if remote_controller.update():
+            #    if remote_controller.is_v_nonzero():
+            #        c_data.speed = remote_controller.v
+            #    if remote_controller.is_sa_nonzero():
+            #        c_data.steering_angle = -remote_controller.sa
 
             q_control.put(c_data)
 
