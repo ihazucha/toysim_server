@@ -1,73 +1,60 @@
-# ToySim UI
+# ToySim Proxy + UI
 
-Desktop application for the ToySim suite contains:
+I wan to explore the world of simulation, physical tinkering, data visualization,
+computer vision, control theory, and others, combined in compact package for whoever wishes to have fun with it.
+
+The idea here is to make it simple to implement, debug and fine-tune different
+methods of control in both simulated and physical environment, using either real-time
+data or recorded play-back to test and iterate upon.
+
+I want to keep this as simple as possible. I make the custom tools to try things out for myself, my way, for comparison. But otherwise there are solutions
+for:
+ - framework:
+   - https://docs.ros.org/en/foxy/index.html
+ - data capture:
+   - https://mcap.dev/spec
+ - visualization:
+   - https://app.foxglove.dev
+   - https://wiki.ros.org/rviz
+
+## Proxy
+
+Server CMD app to which simulation or physical vehicle connect. It receives state data and can send control inputs based on implemented vehicle controller.
 
 - Server to send/recv to/from simulation/car  
 - (Remote) Controller:
   - DualShock (PS5)
-  - Keyboard  
-  - Software self-driving
-    - choice from multiple methods of detection, path planning, and path tracking
-- UI for:
-  - visualization of simulation/car data
-  - finetuning of settings and algorithm parameters
-  - recorder/playback of simulation data
+  - Self-Driving - various methods of position estimation, detection, path planning, and path tracking
 
-The general idea is to make it easy to implement, debug and fine-tune different
-methods of controlling the car in both simulated and physical environment, using either real-time
-data or recorded play-back to test and iterate upon.
+## UI
+Qt desktop app for live/playback data visualization and parameter control.
 
-The intention was to explore the world of simulation, physical tinkering, data visualization,
-computer vision, control theory, and others, combined in compact package for whoever wishes to have fun.
-
----
-
-## TODO: BUGS
-
-- [ ] When TcpConnection_BP has tick time set to 0.5s - the connection will be made but no data will be passed for some reason
+- Visualization of simulation/car data
+- Tuning of settings and algorithm parameters
+- Data recording/playback
 
 ## TODO
 
- 
-- [ ] System Panel
-  - FPS/dt of the simulation/car (components)
-  - FPS/dt of the UI
-  - dt between UI and Client
-    - [ ] current value and history (plot)
-- [x] THE SIMULATION DEPTH DATA IS INCORRECT - EACH PIXEL SHOWS DISTANCE FROM THE PIXEL, NOT FROM CAMERA CENTER
-  - [ ] Make this to be done inside of the simulation, rather than in the processor
-- [ ] Standardize simulation and physical car communication channel
-- [ ] Record-playback:
-  - Sidebar with recordings:
-    - simulation datetime
-    - editable optional description
-    - Client ID (sim/alamak)
-    - first image (if video-feed present)
-    - "Open folder" button
-    - recordings folder path
-    - double-click to play, or play button
-    - shows which recording is selected (playing)
-  - playback bar
-    - pause/play
-    - forward/back
-    - reset (from)
-    - timeline time ((mili)seconds)
-    - timeline frames
-    - ability to navigate in timeline fast
-- menu of available controllers
-  - controller panel for each controller
+- Time deltas
+  - [ ] Simulation/Car components
+  - [ ] Client to Proxy
+  - [ ] Proxy to UI (render)
+- [ ] Unify data format using topics
+- [ ] Unify data capture using MCAP:
+- Recording:
+  - [ ] Currently frames based on camera time - reworks using simulation time
+  - [ ] Make playback bar closable
+- [ ] Choose source (simulation, car, playback)
+- [ ] Choose controller type and update controller panel
 
-### Attributions/Sources
-Icons: - put on git/in the thesis
-Uicons by <a href="https://www.flaticon.com/uicons">Flaticon</a>
+## Attributions/Sources
 
-- pyqtgraph has to be the latest install (from source)
+- pyqtgraph dev version
   - https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html
-- superqt
-  - https://pyapp-kit.github.io/superqt/
-- pip install fonticon-materialdesignicons7
+- superqt: https://pyapp-kit.github.io/superqt/
+  - (pip install) fonticon-materialdesignicons7
 
-- Describe engines:
+- Alternative simulation engines:
   - https://github.com/o3de/o3de
-  - NVIDIA ISAAC
+  - https://developer.nvidia.com/isaac
   - https://github.com/projectchrono/chrono
