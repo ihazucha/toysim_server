@@ -1,6 +1,5 @@
 from datalink.ipc import SPMCQueue, MPMCQueue, AddrType
 
-# TODO: make into a singleton
 class Messaging:
     def __init__(self):
         self.q_sim = MPMCQueue(name="sim", addr_type=AddrType.TCP, ports=(11001, 11002), q_size=10)

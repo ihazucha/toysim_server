@@ -1,6 +1,6 @@
 # ToySim Proxy + UI
 
-I wan to explore the world of simulation, physical tinkering, data visualization,
+I want to explore the world of simulation, physical tinkering, data visualization,
 computer vision, control theory, and others, combined in compact package for whoever wishes to have fun with it.
 
 The idea here is to make it simple to implement, debug and fine-tune different

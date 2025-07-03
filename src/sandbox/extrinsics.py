@@ -1,19 +1,15 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import warnings
-import time
 
 warnings.simplefilter("ignore", np.RankWarning)
 
 
 from modules.recorder import RecordReader
-from datalink.data import Position, Rotation, Pose, ProcessedRealData
+from datalink.data import ProcessedRealData
 from utils.paths import record_path
 
-from src.modules.path_planning.roadmarks import RoadmarksPlanner, RoadmarksPlannerConfig, Camera, rpi_v2_intrinsic_matrix, HSVColorFilter, unreal_engine_intrinsic_matrix
 import glob
-import os
 
 def run_frames():
     reader = RecordReader()
