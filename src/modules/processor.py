@@ -26,6 +26,7 @@ from modules.path_planning.roadmarks import (
     HSVColorFilter,
     rpi_v2_intrinsic_matrix_from_fov,
     unreal_engine_intrinsic_matrix,
+    RPICamera_V3_WIDE_FOV_DEG,
 )
 
 from threading import Thread
@@ -71,7 +72,9 @@ def compute_radial_dist(width: int, height: int):
 
 # # TODO: precalculate UV (image coordinates) for all points on the road
 # # TODO: remove None checks - should be empty arrays for more clarity
-def draw_debug_data(image, planner: RoadmarksPlanner, controller: PurePursuitController) -> np.ndarray:
+def draw_debug_data(
+    image, planner: RoadmarksPlanner, controller: PurePursuitController
+) -> np.ndarray:
     image_copy = image.copy()
 
     # Roadmark dots
@@ -104,7 +107,7 @@ class ControllerType(Enum):
     DUALSENSE = "dualsense"
     ROADMARKS = "roadmarks"
     REAL_ROADMARKS = "real_roadmarks"
-
+    WEBOTS_ROADMARKS = "webots_roadmarks"
 
 
 def depth_from_image_center(radial_dist, depth: np.ndarray):
@@ -124,6 +127,7 @@ class Processor(Process):
             ControllerType.DUALSENSE: self._run_dualsense,
             ControllerType.ROADMARKS: self._run_roadmarks,
             ControllerType.REAL_ROADMARKS: self._run_real_roadmarks,
+            ControllerType.WEBOTS_ROADMARKS: self._run_webots_roadmarks,
         }.get(self._controller_type)
         assert self._run, f'Unknown controller "{self._controller_type}", stopping..'
 
@@ -164,12 +168,14 @@ class Processor(Process):
         planner = RoadmarksPlanner(
             camera=camera,
             filter=HSVColorFilter.new_red(),
-            config=RoadmarksPlannerConfig(roadmark_min_area=11, roadmark_max_count=6, roadmark_max_distance=100000),
+            config=RoadmarksPlannerConfig(
+                roadmark_min_area=11, roadmark_max_count=6, roadmark_max_distance=100000
+            ),
         )
-        
+
         controller_config = PurePursuitConfig.new_simulation()
         controller = PurePursuitController(config=controller_config)
-        
+
         q_simulation = messaging.q_sim.get_consumer()
         q_processing = messaging.q_sim_processing.get_producer()
         q_control = messaging.q_control.get_producer()
@@ -192,7 +198,9 @@ class Processor(Process):
             # TODO: should be done by simulation/car
             depth = depth_from_image_center(RADIAL_DIST, data.camera.depth_image)
             debug_image = draw_debug_data(data.camera.rgb_image, planner, controller)
-            rm_data = RoadmarksData(roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe)
+            rm_data = RoadmarksData(
+                roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe
+            )
             p_data = ProcessedSimData(
                 begin_timestamp=q_simulation.last_get_timestamp,
                 control_data=c_data,
@@ -216,7 +224,7 @@ class Processor(Process):
 
         controller_config = PurePursuitConfig.new_alamak()
         controller = PurePursuitController(config=controller_config)
-        # remote_controller = DualSense()
+        remote_controller = DualSense()
 
         q_control = messaging.q_control.get_producer()
         q_real = messaging.q_real.get_consumer()
@@ -225,7 +233,8 @@ class Processor(Process):
         # Sync
         _ = RealData.from_bytes(q_real.get())
         # TODO: the controller lib can hang trying to connect, init in separate thread
-        # remote_controller.connect()
+        remote_controller.connect()
+        print("remote connected")
 
         while True:
             data: RealData = RealData.from_bytes(q_real.get())
@@ -243,11 +252,11 @@ class Processor(Process):
             # print(servo_corrected_steering_angle)
             c_data = ControlData(controller.timestamp, speed, servo_corrected_steering_angle)
 
-            #if remote_controller.update():
-            #    if remote_controller.is_v_nonzero():
-            #        c_data.speed = remote_controller.v
-            #    if remote_controller.is_sa_nonzero():
-            #        c_data.steering_angle = -remote_controller.sa
+            if remote_controller.update():
+                if remote_controller.is_v_nonzero():
+                    c_data.speed = remote_controller.v
+                if remote_controller.is_sa_nonzero():
+                    c_data.steering_angle = -remote_controller.sa
 
             q_control.put(c_data)
 
@@ -261,6 +270,55 @@ class Processor(Process):
                 control_data=c_data,
                 debug_image=debug_image,
                 roadmarks_data=rm_data,
+                original=data,
+            )
+            q_processing.put(p_data)
+
+    def _run_webots_roadmarks(self):
+        image_shape = (3280 // 4, 2464 // 4)
+        camera = Camera(
+            pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -0.01, 0)),
+            image_shape=image_shape,
+            intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
+        )
+        config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
+        planner = RoadmarksPlanner(camera=camera, filter=HSVColorFilter.new_bright(), config=config)
+
+        controller_config = PurePursuitConfig.new_alamak()
+        controller_config.lookahead_dist_max = 1.0
+        controller = PurePursuitController(config=controller_config)
+
+        start_apply_ui_config_thread(controller)
+
+        q_control = messaging.q_control.get_producer()
+        q_real = messaging.q_sim.get_consumer()
+        q_processing = messaging.q_real_processing.get_producer()
+
+        while True:
+            data: RealData = q_real.get()
+            if data is None:
+                continue
+            jpg = data.sensor_fusion.camera.jpg
+            img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+            # img = camera.undistort_image(img)
+
+            planner.update(img=img)
+            controller.update(path=planner.path_roadframe, speed=data.sensor_fusion.avg_speed)
+
+            speed = 0.0
+            c_data = ControlData(controller.timestamp, speed, controller.steering_angle)
+
+            q_control.put(c_data)
+
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            debug_image = draw_debug_data(img_rgb, planner, controller)
+
+            rms = RoadmarksData(roadmarks=planner.roadmarks_roadframe, path=planner.path_roadframe)
+            p_data = ProcessedRealData(
+                begin_timestamp=q_real.last_get_timestamp,
+                control_data=c_data,
+                debug_image=debug_image,
+                roadmarks_data=rms,
                 original=data,
             )
             q_processing.put(p_data)

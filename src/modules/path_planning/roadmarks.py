@@ -36,8 +36,10 @@ def rpi_v2_intrinsic_matrix(image_shape: Tuple[int, int], binning_factor=2):
         ]
     )
 
+RPICamera_V2_FOV_DEG = (62.2, 48.8)
+RPICamera_V3_WIDE_FOV_DEG = (102.0, 67.0)
 
-def rpi_v2_intrinsic_matrix_from_fov(image_shape: Tuple[int, int]):
+def rpi_v2_intrinsic_matrix_from_fov(image_shape: Tuple[int, int], fov_deg=RPICamera_V2_FOV_DEG):
     """
     Calculate the intrinsic matrix for Raspberry Pi Camera V2 using FOV values.
 
@@ -48,13 +50,9 @@ def rpi_v2_intrinsic_matrix_from_fov(image_shape: Tuple[int, int]):
         3x3 intrinsic camera matrix
     """
 
-    # RPI Camera V2 FOV in degrees
-    fov_h_deg = 62.2  # Horizontal FOV
-    fov_v_deg = 48.8  # Vertical FOV
-
     # Convert FOV to radians
-    fov_h = np.deg2rad(fov_h_deg)
-    fov_v = np.deg2rad(fov_v_deg)
+    fov_h = np.deg2rad(fov_deg[0])
+    fov_v = np.deg2rad(fov_deg[1])
 
     width, height = image_shape
 

@@ -16,19 +16,23 @@ from modules.ui.plots import DATA_QUEUE_SIZE, ENCODER_RAW2DEG
 # Helpers
 # -------------------------------------------------------------------------------------------------
 
+
 def jpg2qimg(jpg: bytes):
     bgr = imdecode(np.frombuffer(jpg, np.uint8), IMREAD_COLOR)
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     return rgb2qimg(rgb)
 
+
 def rgb2qimg(rgb: np.ndarray[Any, np.dtype[np.uint8]]):
     h, w, channels = rgb.shape
     return QImage(rgb.data, w, h, channels * w, QImage.Format_RGB888)
+
 
 def depth2qimg(depth: np.ndarray) -> QImage:
     depth_colormap = depth2colormap(depth)
     w, h, _ = depth_colormap.shape
     return QImage(depth_colormap.data, h, w, QImage.Format_BGR888)
+
 
 def depth2colormap(depth: np.ndarray):
     normalized_inverted = 255 - (depth / 5000 * 255).astype(np.uint8)
@@ -242,6 +246,30 @@ class SimDataThread(QThread):
         self._is_running = False
         self.quit()
 
+
+def estimate_steering_angle_deg(speed, yaw_rate, wheelbase=0.185):
+    """
+    Bicycle model Steering Angle estimate
+
+    Args:
+        speed: Vehicle speed [m/s]
+        yaw_rate: Vehicle yaw rate [rad/s]
+        wheelbase: Distance between front and rear axles [m]
+
+    Returns:
+        Estimated Steering Angle in degrees
+    """
+    if abs(speed) < 0.1:
+        return 0.0
+
+    # Bicycle model: tan(δ) = (L * ω) / v
+    # where: δ = steering angle, L = wheelbase, ω = yaw rate, v = speed
+    steering_angle_rad = np.arctan2(wheelbase * yaw_rate, speed)
+
+    # Convert to degrees
+    return np.degrees(steering_angle_rad)
+
+
 class RealDataThread(QThread):
     data_ready = Signal(QRealData)
 
@@ -280,17 +308,23 @@ class RealDataThread(QThread):
             image_array = imdecode(np.frombuffer(jpg_image_data.jpg, np.uint8), IMREAD_COLOR)
             image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
 
+            tgt_speed = 1.25 if pr_data.original.control.speed > 0 else pr_data.original.control.speed
             self.long_control_plot_data.update(
                 pr_data.original.sensor_fusion.avg_speed,
-                pr_data.original.control.speed,
+                tgt_speed,
                 pr_data.original.actuators.motor_power * 100,
             )
             self.long_control_plot_data_ready.emit(self.long_control_plot_data)
 
+            estimated_sa = estimate_steering_angle_deg(
+                speed=pr_data.original.sensor_fusion.avg_speed,
+                yaw_rate=self.imu_plot_data.gyro_avg[2],
+            )
+
             self.lat_control_plot_data.update(
-                pr_data.control_data.steering_angle / 3,
-                pr_data.control_data.steering_angle / 2,
-                pr_data.control_data.steering_angle,
+                estimated_sa=estimated_sa,
+                target_sa=pr_data.control_data.steering_angle / 3,
+                input_sa=pr_data.control_data.steering_angle / 3,
             )
             self.lat_control_plot_data_ready.emit(self.lat_control_plot_data)
 

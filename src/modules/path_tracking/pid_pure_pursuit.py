@@ -16,6 +16,7 @@ class PurePursuit:
         waypoints = waypoints.copy()
         waypoints[:, 0] += self.config.waypoint_shift
         look_ahead_distance = np.clip(self.config.lookahead_factor * speed, self.config.lookahead_dist_min, self.config.lookahead_dist_max)
+        look_ahead_distance = 1
         # print(waypoints)
         # print(look_ahead_distance)
         track_point = self.get_target_point(look_ahead_distance, waypoints)

@@ -1,5 +1,3 @@
-import sys
-
 from argparse import ArgumentParser
 
 from datalink.network import TcpServer, get_local_ip
@@ -24,12 +22,12 @@ def main():
     sim_addr = (args.ip, args.sim_port)
     real_addr = (args.ip, args.real_port)
 
-    p_sim_server = TcpServer(addr=sim_addr, q_recv=msg.q_sim, q_send=msg.q_control, id="sim")
+    # p_sim_server = TcpServer(addr=sim_addr, q_recv=msg.q_sim, q_send=msg.q_control, id="sim")
     p_real_server = TcpServer(addr=real_addr, q_recv=msg.q_real, q_send=msg.q_control, id="real")
     p_processor = Processor(controller_type=ControllerType(args.controller))
 
     processes = [
-        p_sim_server,
+        # p_sim_server,
         p_real_server,
         p_processor,
         # TODO: figure out a cleaner way to run MPMCQueue on Windows (e.g. singleton using file lock...)

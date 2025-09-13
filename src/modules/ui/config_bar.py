@@ -56,11 +56,8 @@ class FloatSlider(QWidget):
         self.setLayout(layout)
 
     def update_text_input(self, value):
-        float_value = value
-        step_value = self.slider.singleStep()
-        rounded_value = round(float_value / step_value) * step_value
-        self.config_panel.update_data(self.key, rounded_value)
-        self.value_input.setText(f"{rounded_value:.2f}")
+        self.config_panel.update_data(self.key, value)
+        self.value_input.setText(f"{value:.2f}")
 
     def update_slider_value(self, text):
         try:
@@ -76,7 +73,7 @@ class FloatSlider(QWidget):
 class ConfigSidebar(QDockWidget):
     def __init__(self, parent=None, default_closed=True):
         super().__init__("Config", parent)
-        self.data = PurePursuitConfig.new_simulation()
+        self.data = PurePursuitConfig.new_alamak()
         self.init_ui()
         self._q_ui = messaging.q_ui.get_producer()
         
