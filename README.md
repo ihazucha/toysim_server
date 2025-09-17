@@ -1,51 +1,37 @@
-# ToySim Proxy + UI
+# ToySim - Proxy Server & GUI
 
-I want to explore the world of simulation, physical tinkering, data visualization,
-computer vision, control theory, and others, combined in compact package for whoever wishes to have fun with it.
+Exploring simulation, tinkering, data visualization, computer vision, control theory and others, combined in compact package for whoever wishes enjoy.
 
-The idea here is to make it simple to implement, debug and fine-tune different
-methods of control in both simulated and physical environment, using either real-time
-data or recorded play-back to test and iterate upon.
+The idea here is to make it simple to implement, debug and fine-tune different methods of control for a model vehicle in both simulation and physical world.
 
-I want to keep this as simple as possible. I make the custom tools to try things out for myself, my way, for comparison. But otherwise there are solutions
+I want to keep this custom but simple. The obvious software to use for robotics appplications is:
 for:
- - framework:
+ - Framework:
    - https://docs.ros.org/en/foxy/index.html
- - data capture:
+ - Data Capture:
    - https://mcap.dev/spec
- - visualization:
+ - Visualization:
    - https://app.foxglove.dev
    - https://wiki.ros.org/rviz
 
-## Proxy
+## Proxy Server
 
-Server CMD app to which simulation or physical vehicle connect. It receives state data and can send control inputs based on implemented vehicle controller.
+CMD app to which simulation and physical vehicle connect. It exchanges data with the vehicle and implements the self-driving controller.
 
-- Server to send/recv to/from simulation/car  
-- (Remote) Controller:
-  - DualShock (PS5)
-  - Self-Driving - various methods of position estimation, detection, path planning, and path tracking
+## GUI
 
-## UI
-Qt desktop app for live/playback data visualization and parameter control.
-
-- Visualization of simulation/car data
-- Tuning of settings and algorithm parameters
-- Data recording/playback
+Desktop app for live/playback data visualization and parameters control.
 
 ## TODO
 
+Split Proxy and GUI to separate projects, reimplement UI in browser using websockets or use existing (Foxglove studio)
+
 - Time deltas
-  - [ ] Simulation/Car components
+  - [ ] Between Simulation/Car components
   - [ ] Client to Proxy
   - [ ] Proxy to UI (render)
 - [ ] Unify data format using topics
 - [ ] Unify data capture using MCAP:
-- Recording:
-  - [ ] Currently frames based on camera time - reworks using simulation time
-  - [ ] Make playback bar closable
-- [ ] Choose source (simulation, car, playback)
-- [ ] Choose controller type and update controller panel
 
 ## Attributions/Sources
 
@@ -53,8 +39,3 @@ Qt desktop app for live/playback data visualization and parameter control.
   - https://pyqtgraph.readthedocs.io/en/latest/getting_started/installation.html
 - superqt: https://pyapp-kit.github.io/superqt/
   - (pip install) fonticon-materialdesignicons7
-
-- Alternative simulation engines:
-  - https://github.com/o3de/o3de
-  - https://developer.nvidia.com/isaac
-  - https://github.com/projectchrono/chrono

@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 
 from datalink.network import TcpServer, get_local_ip
-from modules.processor import Processor, ControllerType
+from modules.processor import Processor, ClientType, ManualType
 from modules.messaging import messaging as msg
 
 
@@ -11,7 +11,10 @@ def parse_args():
     parser.add_argument("--sim_port", type=int, default=8888, help="Server port for simulation")
     parser.add_argument("--real_port", type=int, default=9999, help="Server port for real vehicle")
     parser.add_argument(
-        "-c", "--controller", type=str, required=True, choices=[c.value for c in ControllerType]
+        "-c", "--client", type=str, required=True, choices=[c.value for c in ClientType]
+    )
+    parser.add_argument(
+        "-m", "--manual", type=str, default=ManualType.KEYBOARD, choices=[c.value for c in ManualType]
     )
     return parser.parse_args()
 
@@ -24,7 +27,7 @@ def main():
 
     # p_sim_server = TcpServer(addr=sim_addr, q_recv=msg.q_sim, q_send=msg.q_control, id="sim")
     p_real_server = TcpServer(addr=real_addr, q_recv=msg.q_real, q_send=msg.q_control, id="real")
-    p_processor = Processor(controller_type=ControllerType(args.controller))
+    p_processor = Processor(client_type=ClientType(args.client), manual_type=ManualType(args.manual))
 
     processes = [
         # p_sim_server,
@@ -32,6 +35,7 @@ def main():
         p_processor,
         # TODO: figure out a cleaner way to run MPMCQueue on Windows (e.g. singleton using file lock...)
         msg.q_sim.get_proxy(),
+        msg.q_ui.get_proxy(),
     ]
 
     [p.start() for p in processes]

@@ -123,4 +123,4 @@ class ConfigSidebar(QDockWidget):
     def update_data(self, key, value):
         # TODO: think of a more reliable messaging architecture, and closer to callbacks
         setattr(self.data, key, value)
-        self._q_ui.put(self.data)
+        self._q_ui.put(self.data, topic=b"ui_config")

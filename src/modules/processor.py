@@ -1,4 +1,4 @@
-from time import sleep, time_ns
+from time import sleep
 
 from multiprocessing import Process
 import traceback
@@ -26,33 +26,22 @@ from modules.path_planning.roadmarks import (
     HSVColorFilter,
     rpi_v2_intrinsic_matrix_from_fov,
     unreal_engine_intrinsic_matrix,
-    RPICamera_V3_WIDE_FOV_DEG,
 )
 
 from threading import Thread
-from enum import Enum
+from enum import StrEnum
 
 
-# TODO: figure out more elegant way to update to avoid blocking
-# --------------------------------------------------------------
-# Solution to implement:
-# Process that acts as a proxy for communication between the modules (processes),
-# receives and sends messages between them and updates their settings accordingly
-# This will be done by registering callbacks that will be called upon message receive from
-# a given interface
-# Message should be confirmed by the receiver upon delivery with an ACK message
-
-
+# TODO: rework
 def apply_ui_config(controller: PurePursuitConfig):
-    q_ui = messaging.q_ui.get_consumer()
+    q_ui_config = messaging.q_ui.get_consumer(b"ui_config")
     while True:
-        config: PurePursuitConfig = q_ui.get()
+        config: PurePursuitConfig = q_ui_config.get()
         controller.set_config(config)
 
 
 def start_apply_ui_config_thread(controller: PurePursuitController):
     Thread(target=apply_ui_config, args=[controller], daemon=True).start()
-
 
 # --------------------------------------------------------------
 
@@ -103,11 +92,20 @@ def draw_debug_data(
     return image_copy
 
 
-class ControllerType(Enum):
+class ClientType(StrEnum):
+    MANUAL = "manual"
+    UE5 = "ue5"
+    REAL = "real"
+    WEBOTS = "webots"
+
+
+class ManualType(StrEnum):
     DUALSENSE = "dualsense"
+    KEYBOARD = "keyboard"
+
+
+class ScenarioType(StrEnum):
     ROADMARKS = "roadmarks"
-    REAL_ROADMARKS = "real_roadmarks"
-    WEBOTS_ROADMARKS = "webots_roadmarks"
 
 
 def depth_from_image_center(radial_dist, depth: np.ndarray):
@@ -120,28 +118,29 @@ def depth_from_image_center(radial_dist, depth: np.ndarray):
 
 
 class Processor(Process):
-    def __init__(self, controller_type: ControllerType):
+    def __init__(self, client_type: ClientType, manual_type: ManualType):
         super().__init__()
-        self._controller_type = controller_type
+        self._client_type = client_type
+        self._manual_type = manual_type
         self._run = {
-            ControllerType.DUALSENSE: self._run_dualsense,
-            ControllerType.ROADMARKS: self._run_roadmarks,
-            ControllerType.REAL_ROADMARKS: self._run_real_roadmarks,
-            ControllerType.WEBOTS_ROADMARKS: self._run_webots_roadmarks,
-        }.get(self._controller_type)
-        assert self._run, f'Unknown controller "{self._controller_type}", stopping..'
+            ClientType.MANUAL: self._run_manual,
+            ClientType.UE5: self._run_ue5,
+            ClientType.REAL: self._run_real,
+            ClientType.WEBOTS: self._run_webots,
+        }.get(self._client_type)
+        assert self._run, f'Unknown client "{self._client_type}", stopping..'
 
     def run(self):
         while True:
             try:
                 self._run()
             except:
-                print(f"Controller {self._controller_type} error:")
+                print(f"client {self._client_type} error:")
                 traceback.print_exc()
                 print(f"Attempting restart after 1 second..")
                 sleep(1)
 
-    def _run_dualsense(self):
+    def _run_manual(self):
         dualsense = DualSense()
         dualsense.connect()
         if not dualsense.is_alive():
@@ -156,7 +155,7 @@ class Processor(Process):
             q_control.put(ctrls)
             sleep(0.02)
 
-    def _run_roadmarks(self):
+    def _run_ue5(self):
         # TODO: obtain data about the camera from the system
         image_shape = (640, 480)
         # TODO: adjust FOV in the simulator to match the RPi camera
@@ -211,31 +210,38 @@ class Processor(Process):
             )
             q_processing.put(p_data)
 
-    def _run_real_roadmarks(self):
-        # TODO: obtain data about the camera from the system
-        image_shape = (3280 // 4, 2464 // 4)
+    def _run_real(self):
+        q_control = messaging.q_control.get_producer()
+        q_real = messaging.q_real.get_consumer()
+        q_processing = messaging.q_real_processing.get_producer()
+        q_ui_controller = messaging.q_ui.get_consumer()
+
+        # Get data for initial setup
+        data = RealData.from_bytes(q_real.get())
+        img = cv2.imdecode(np.frombuffer(data.sensor_fusion.camera.jpg, np.uint8), cv2.IMREAD_COLOR)
+        image_shape = (img.shape[1], img.shape[0])
         camera = Camera(
             pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, 0.01, 0)),
             image_shape=image_shape,
             intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
         )
-        config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
-        planner = RoadmarksPlanner(camera=camera, filter=HSVColorFilter.new_bright(), config=config)
+        planner_config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
+        planner = RoadmarksPlanner(
+            camera=camera, filter=HSVColorFilter.new_bright(), config=planner_config
+        )
 
         controller_config = PurePursuitConfig.new_alamak()
         controller = PurePursuitController(config=controller_config)
-        remote_controller = DualSense()
 
-        q_control = messaging.q_control.get_producer()
-        q_real = messaging.q_real.get_consumer()
-        q_processing = messaging.q_real_processing.get_producer()
-
-        # Sync
-        _ = RealData.from_bytes(q_real.get())
         # TODO: the controller lib can hang trying to connect, init in separate thread
+        remote_controller = DualSense()
         remote_controller.connect()
         print("remote connected")
 
+        self.last_ui_controller_data: ControlData | None = None
+
+        # Sync
+        _ = RealData.from_bytes(q_real.get())
         while True:
             data: RealData = RealData.from_bytes(q_real.get())
             img = cv2.imdecode(
@@ -258,6 +264,15 @@ class Processor(Process):
                 if remote_controller.is_sa_nonzero():
                     c_data.steering_angle = -remote_controller.sa
 
+            ui_controller_data: ControlData = q_ui_controller.get(timeout=5)
+            controller_data = ui_controller_data if ui_controller_data is not None else self.last_ui_controller_data
+            if controller_data is not None:
+                print(f"speed: {controller_data.speed} sa: {controller_data.steering_angle}")
+                c_data.speed = controller_data.speed
+                c_data.steering_angle = controller_data.steering_angle    
+ 
+            self.last_ui_controller_data = ui_controller_data
+            print(c_data.steering_angle)
             q_control.put(c_data)
 
             debug_image = draw_debug_data(img_rgb, planner, controller)
@@ -274,15 +289,25 @@ class Processor(Process):
             )
             q_processing.put(p_data)
 
-    def _run_webots_roadmarks(self):
-        image_shape = (3280 // 4, 2464 // 4)
+    def _run_webots(self):
+        q_control = messaging.q_control.get_producer()
+        q_real = messaging.q_sim.get_consumer()
+        q_processing = messaging.q_real_processing.get_producer()
+
+        # Get data for initial setup
+        data: RealData = q_real.get()
+        img = cv2.imdecode(np.frombuffer(data.sensor_fusion.camera.jpg, np.uint8), cv2.IMREAD_COLOR)
+        print(img.shape)
+        image_shape = (img.shape[1], img.shape[0])
         camera = Camera(
             pose=Pose(position=Position(0, 0.125, 0), rotation=Rotation(0, -0.01, 0)),
             image_shape=image_shape,
             intrinsic_matrix=rpi_v2_intrinsic_matrix_from_fov(image_shape=image_shape),
         )
-        config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
-        planner = RoadmarksPlanner(camera=camera, filter=HSVColorFilter.new_bright(), config=config)
+        planner_config = RoadmarksPlannerConfig(roadmark_min_area=50, roadmark_max_count=6)
+        planner = RoadmarksPlanner(
+            camera=camera, filter=HSVColorFilter.new_bright(), config=planner_config
+        )
 
         controller_config = PurePursuitConfig.new_alamak()
         controller_config.lookahead_dist_max = 1.0
@@ -290,17 +315,12 @@ class Processor(Process):
 
         start_apply_ui_config_thread(controller)
 
-        q_control = messaging.q_control.get_producer()
-        q_real = messaging.q_sim.get_consumer()
-        q_processing = messaging.q_real_processing.get_producer()
-
         while True:
             data: RealData = q_real.get()
             if data is None:
                 continue
             jpg = data.sensor_fusion.camera.jpg
             img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
-            # img = camera.undistort_image(img)
 
             planner.update(img=img)
             controller.update(path=planner.path_roadframe, speed=data.sensor_fusion.avg_speed)

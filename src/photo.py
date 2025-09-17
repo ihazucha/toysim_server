@@ -7,7 +7,7 @@ import os
 if __name__ == "__main__":
     # Args
     parser = argparse.ArgumentParser(description='Camera client connects to tcp://--ip:--port and displays live camera feed. Press <Spacebar> to save image to --save-dir directory and <Esc> to quit.')
-    parser.add_argument('--ip', help='Connct to IP address')
+    parser.add_argument('--ip', required=True, help='Connect to IP addr')
     parser.add_argument('--port', type=int, default=5001, help='Connect to port (default: 5001)')
     parser.add_argument('--save-dir', default=os.getcwd(), help=f'Directory to save images (default: {os.getcwd()})')
     args = parser.parse_args()
@@ -52,6 +52,7 @@ if __name__ == "__main__":
         elif key == 32:  # Spacebar to save
             fname = os.path.join(args.save_dir, "image.jpg")
             cv2.imwrite(fname, img)
+            cv2.imshow("Last Photo", canvas)
             print(f"Saved {fname}")
     
     cv2.destroyAllWindows()

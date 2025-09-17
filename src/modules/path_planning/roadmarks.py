@@ -5,12 +5,6 @@ from datalink.data import Pose
 from typing import Tuple, List
 from scipy.interpolate import splprep, splev
 
-# TODO: check for polyfit properly
-import warnings
-
-# warnings.simplefilter("ignore", np.RankWarning)
-
-
 # Camera
 # -------------------------------------------------------------------------------------------------------------
 
@@ -20,9 +14,6 @@ def rpi_v2_intrinsic_matrix(image_shape: Tuple[int, int], binning_factor=2):
     focal_len_mm = 3.04
     pixel_size_mm = 0.00112
     focal_len_pixels = focal_len_mm / pixel_size_mm
-    # focal_len = 3.04 / 1e3
-    # pixel_size = 0.00112 / 1e3
-    # focal_len_pixels = focal_len / pixel_size
 
     # Binning combines nearby (2, 4..) pixel values into one
     fx = fy = focal_len_pixels
@@ -40,37 +31,17 @@ RPICamera_V2_FOV_DEG = (62.2, 48.8)
 RPICamera_V3_WIDE_FOV_DEG = (102.0, 67.0)
 
 def rpi_v2_intrinsic_matrix_from_fov(image_shape: Tuple[int, int], fov_deg=RPICamera_V2_FOV_DEG):
-    """
-    Calculate the intrinsic matrix for Raspberry Pi Camera V2 using FOV values.
-
-    Args:
-        image_shape: (height, width) in pixels
-
-    Returns:
-        3x3 intrinsic camera matrix
-    """
-
-    # Convert FOV to radians
-    fov_h = np.deg2rad(fov_deg[0])
-    fov_v = np.deg2rad(fov_deg[1])
-
+    fov = np.deg2rad(fov_deg[0]), np.deg2rad(fov_deg[1])
     width, height = image_shape
 
-    # Calculate focal lengths using FOV
-    fx = (width / 2) / np.tan(fov_h / 2)
-    fy = (height / 2) / np.tan(fov_v / 2)
+    # Focal lengths
+    fx = (width / 2) / np.tan(fov[0] / 2)
+    fy = (height / 2) / np.tan(fov[1] / 2)
 
-    # Principal point (typically center of image)
+    # Principal point
     cx = width / 2
     cy = height / 2
 
-    # return np.array([
-    #     [631.00614559,   0.,         399.13995178],
-    #     [0.,         630.71927485, 298.79517474],
-    #     [0.,           0.,           1.        ]
-    # ])
-
-    # Create the intrinsic matrix
     return np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 
 
