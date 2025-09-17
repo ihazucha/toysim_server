@@ -272,7 +272,6 @@ class Processor(Process):
                 c_data.steering_angle = controller_data.steering_angle    
  
             self.last_ui_controller_data = ui_controller_data
-            print(c_data.steering_angle)
             q_control.put(c_data)
 
             debug_image = draw_debug_data(img_rgb, planner, controller)
