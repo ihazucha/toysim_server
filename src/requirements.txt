@@ -42,6 +42,7 @@ pyinstrument==5.0.1
 PyOpenGL==3.1.7
 PyOpenGL-accelerate==3.1.7
 pyparsing==3.2.1
+pyqtgraph @ file:///C:/Users/ihazu/Desktop/projects/toysim_server/src/pyqtgraph
 PySide6==6.8.1
 PySide6_Addons==6.8.1
 PySide6_Essentials==6.8.1
