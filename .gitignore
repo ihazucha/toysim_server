@@ -7,6 +7,6 @@ __pycache__/
 .vscode/
 
 # Data
-storage/records/*
+storage/records/*.pickle
 *.tsr
 *.npy
