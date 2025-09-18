@@ -156,6 +156,10 @@ class RecordsSidebar(QDockWidget):
     def load_records(self):
         self.record_list.clear()
 
+        if not os.path.exists(PATH_RECORDS):
+            pwarn(f"[{self.__class__.__name__}] Records directory does not exist: {PATH_RECORDS}")
+            return
+
         records = os.listdir(PATH_RECORDS)
         records.sort(key=lambda x: int(x.split(".")[0]), reverse=True)
         for record in records:
